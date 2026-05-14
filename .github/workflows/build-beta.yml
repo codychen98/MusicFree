@@ -2,8 +2,6 @@ name: Beta 构建
 
 on:
   push:
-    branches: [dev]
-    paths: ['package.json']
   workflow_dispatch:
     inputs:
       force_build:
@@ -14,7 +12,6 @@ on:
 
 jobs:
   check-version:
-    if: github.actor == 'maotoumao' || github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       should_build: ${{ steps.version_check.outputs.should_build }}
@@ -29,17 +26,25 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "Current version: $VERSION"
           
-          # 检查版本是否符合 -beta.xx 格式
-          if [[ $VERSION =~ -beta\.[0-9]{1,2}$ ]]; then
-            echo "✅ Version matches beta format: $VERSION"
+          # Push: always build. workflow_dispatch: build if forced or version is beta/semver.
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "✅ Push event: will build APK"
             echo "should_build=true" >> $GITHUB_OUTPUT
             echo "version=$VERSION" >> $GITHUB_OUTPUT
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.force_build }}" == "true" ]]; then
             echo "🔧 Force build triggered by workflow_dispatch"
             echo "should_build=true" >> $GITHUB_OUTPUT
             echo "version=$VERSION" >> $GITHUB_OUTPUT
+          elif [[ $VERSION =~ -beta\.[0-9]{1,2}$ ]]; then
+            echo "✅ Version matches beta format: $VERSION"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          elif [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
+            echo "✅ Version matches semver: $VERSION"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
           else
-            echo "❌ Version does not match beta format or not forced: $VERSION"
+            echo "❌ Version not recognized: $VERSION"
             echo "should_build=false" >> $GITHUB_OUTPUT
           fi
 

@@ -188,11 +188,18 @@ class TrackPlayer extends EventEmitter<{
             ReactNativeTrackPlayer.addEventListener(
                 Event.PlaybackActiveTrackChanged,
                 async evt => {
-                    if (
+                    const sentinelMatched =
                         evt.index === 1 &&
                         evt.lastIndex === 0 &&
-                        evt.track?.url === TrackPlayer.fakeAudioUrl
-                    ) {
+                        evt.track?.url === TrackPlayer.fakeAudioUrl;
+                    trace("PlaybackActiveTrackChanged", {
+                        index: evt.index,
+                        lastIndex: evt.lastIndex,
+                        trackUrl: evt.track?.url,
+                        fakeAudioUrl: TrackPlayer.fakeAudioUrl,
+                        sentinelMatched,
+                    });
+                    if (sentinelMatched) {
                         trace("队列末尾，播放下一首");
                         this.emit(TrackPlayerEvents.PlayEnd);
                         if (
