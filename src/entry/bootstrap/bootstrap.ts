@@ -171,10 +171,10 @@ export async function initTrackPlayer(logger?: IPerfLogger) {
 
     const capabilities = Config.getConfig("basic.showExitOnNotification")
         ? [
+            Capability.SkipToPrevious,
             Capability.Play,
             Capability.Pause,
             Capability.SkipToNext,
-            Capability.SkipToPrevious,
             Capability.Stop,
         ]
         : [
@@ -185,6 +185,7 @@ export async function initTrackPlayer(logger?: IPerfLogger) {
         ];
     await RNTrackPlayer.updateOptions({
         icon: ImgAsset.logoTransparent,
+        stopIcon: ImgAsset.notificationExit,
         progressUpdateEventInterval: 1,
         android: {
             alwaysPauseOnInterruption: true,
@@ -193,7 +194,9 @@ export async function initTrackPlayer(logger?: IPerfLogger) {
         },
         capabilities: capabilities,
         compactCapabilities: capabilities,
-        notificationCapabilities: [...capabilities, Capability.SeekTo],
+        // Omit SeekTo here: it was appended after Stop and showed as a second
+        // square that often matched Stop behavior. Scrubbing still uses RemoteSeek.
+        notificationCapabilities: capabilities,
     });
     logger?.mark("播放器初始化完成");
     trace("播放器初始化完成");

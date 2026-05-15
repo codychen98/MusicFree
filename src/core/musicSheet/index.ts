@@ -232,6 +232,32 @@ class MusicSheetClazz implements IInjectable {
         })) as IMusic.IMusicSheetItem[];
     }
 
+    /**
+     * Reorder local playlists (array order = backup / WebDAV order). Favorite sheet stays first.
+     */
+    async reorderSheets(ordered: IMusic.IMusicSheetItemBase[]) {
+        const d = _defaultSheet.id;
+        const defaultRow = ordered.find(s => s.id === d);
+        if (!defaultRow) {
+            return;
+        }
+        const rest = ordered.filter(s => s.id !== d);
+        const normalized: IMusic.IMusicSheetItemBase[] = [defaultRow, ...rest];
+        const current = getDefaultStore().get(musicSheetsBaseAtom);
+        if (normalized.length !== current.length) {
+            return;
+        }
+        const curIds = new Set(current.map(s => s.id));
+        for (const s of normalized) {
+            if (!curIds.has(s.id)) {
+                return;
+            }
+        }
+        await storage.setSheets(normalized);
+        getDefaultStore().set(musicSheetsBaseAtom, normalized);
+        markWebdavLocalMutation();
+    }
+
 
     async resumeSheets(
         sheets: IMusic.IMusicSheetItem[],

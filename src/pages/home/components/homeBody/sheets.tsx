@@ -15,7 +15,80 @@ import Toast from "@/utils/toast";
 import { FlashList } from "@shopify/flash-list";
 import React, { useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
+import DraggableFlatList, { ScaleDecorator } from "react-native-draggable-flatlist";
 import { TouchableWithoutFeedback } from "react-native-gesture-handler";
+
+function renderPlaylistRow(args: {
+    sheet: IMusic.IMusicSheetItemBase | IMusic.IMusicSheetItem;
+    navigate: ReturnType<typeof useNavigate>;
+    t: ReturnType<typeof useI18N>["t"];
+    drag?: () => void;
+}) {
+    const { sheet, navigate, t, drag } = args;
+    const isLocalSheet = !(
+        sheet.platform && sheet.platform !== localPluginPlatform
+    );
+    const isDefault = sheet.id === MusicSheet.defaultSheet.id;
+
+    return (
+        <ListItem
+            heightType="big"
+            withHorizontalPadding
+            onPress={() => {
+                if (isLocalSheet) {
+                    navigate(ROUTE_PATH.LOCAL_SHEET_DETAIL, {
+                        id: sheet.id,
+                    });
+                } else {
+                    navigate(ROUTE_PATH.PLUGIN_SHEET_DETAIL, {
+                        sheetInfo: sheet,
+                    });
+                }
+            }}
+            onLongPress={isDefault ? undefined : drag}>
+            <ListItem.ListItemImage
+                uri={sheet.coverImg ?? sheet.artwork}
+                fallbackImg={ImgAsset.albumDefault}
+                maskIcon={
+                    sheet.id === MusicSheet.defaultSheet.id ? "heart" : null
+                }
+            />
+            <ListItem.Content
+                title={sheet.title}
+                description={
+                    isLocalSheet
+                        ? t("home.songCount", { count: sheet.worksNum })
+                        : `${sheet.artist ?? ""}`
+                }
+            />
+            {sheet.id !== MusicSheet.defaultSheet.id ? (
+                <ListItem.ListItemIcon
+                    position="right"
+                    icon="trash-outline"
+                    onPress={() => {
+                        showDialog("SimpleDialog", {
+                            title: t("dialog.deleteSheetTitle"),
+                            content: t("dialog.deleteSheetContent", {
+                                name: sheet.title,
+                            }),
+                            onOk: async () => {
+                                if (isLocalSheet) {
+                                    await MusicSheet.removeSheet(sheet.id);
+                                    Toast.success(t("toast.deleteSuccess"));
+                                } else {
+                                    await MusicSheet.unstarMusicSheet(
+                                        sheet as IMusic.IMusicSheetItem,
+                                    );
+                                    Toast.success(t("toast.hasUnstarred"));
+                                }
+                            },
+                        });
+                    }}
+                />
+            ) : null}
+        </ListItem>
+    );
+}
 
 export default function Sheets() {
     const [index, setIndex] = useState(0);
@@ -113,82 +186,39 @@ export default function Sheets() {
                     />
                 </View>
             </View>
-            <FlashList
-                ListEmptyComponent={<Empty />}
-                extraData={{ t }}
-                data={(index === 0 ? allSheets : staredSheets) ?? []}
-                estimatedItemSize={ListItem.Size.big}
-                renderItem={({ item: sheet }) => {
-                    const isLocalSheet = !(
-                        sheet.platform && sheet.platform !== localPluginPlatform
-                    );
-
-
-                    return (
-                        <ListItem
-                            key={`${sheet.id}`}
-                            heightType="big"
-                            withHorizontalPadding
-                            onPress={() => {
-                                if (isLocalSheet) {
-                                    navigate(ROUTE_PATH.LOCAL_SHEET_DETAIL, {
-                                        id: sheet.id,
-                                    });
-                                } else {
-                                    navigate(ROUTE_PATH.PLUGIN_SHEET_DETAIL, {
-                                        sheetInfo: sheet,
-                                    });
-                                }
-                            }}>
-                            <ListItem.ListItemImage
-                                uri={sheet.coverImg ?? sheet.artwork}
-                                fallbackImg={ImgAsset.albumDefault}
-                                maskIcon={
-                                    sheet.id === MusicSheet.defaultSheet.id
-                                        ? "heart"
-                                        : null
-                                }
-                            />
-                            <ListItem.Content
-                                title={sheet.title}
-                                description={
-                                    isLocalSheet
-                                        ? t("home.songCount", { count: sheet.worksNum })
-                                        : `${sheet.artist ?? ""}`
-                                }
-                            />
-                            {sheet.id !== MusicSheet.defaultSheet.id ? (
-                                <ListItem.ListItemIcon
-                                    position="right"
-                                    icon="trash-outline"
-                                    onPress={() => {
-                                        showDialog("SimpleDialog", {
-                                            title: t("dialog.deleteSheetTitle"),
-                                            content: t("dialog.deleteSheetContent", {
-                                                name: sheet.title,
-                                            }),
-                                            onOk: async () => {
-                                                if (isLocalSheet) {
-                                                    await MusicSheet.removeSheet(
-                                                        sheet.id,
-                                                    );
-                                                    Toast.success(t("toast.deleteSuccess"));
-                                                } else {
-                                                    await MusicSheet.unstarMusicSheet(
-                                                        sheet,
-                                                    );
-                                                    Toast.success(t("toast.hasUnstarred"));
-                                                }
-                                            },
-                                        });
-                                    }}
-                                />
-                            ) : null}
-                        </ListItem>
-                    );
-                }}
-                nestedScrollEnabled
-            />
+            {index === 0 ? (
+                <DraggableFlatList
+                    data={allSheets}
+                    keyExtractor={(s) => s.id}
+                    scrollEnabled={false}
+                    activationDistance={12}
+                    ListEmptyComponent={<Empty />}
+                    onDragEnd={({ data }) => {
+                        MusicSheet.reorderSheets(data).catch(() => {});
+                    }}
+                    renderItem={({ item: sheet, drag }) => (
+                        <ScaleDecorator>
+                            {renderPlaylistRow({
+                                sheet,
+                                navigate,
+                                t,
+                                drag,
+                            })}
+                        </ScaleDecorator>
+                    )}
+                />
+            ) : (
+                <FlashList
+                    ListEmptyComponent={<Empty />}
+                    extraData={{ t }}
+                    data={staredSheets ?? []}
+                    estimatedItemSize={ListItem.Size.big}
+                    renderItem={({ item: sheet }) =>
+                        renderPlaylistRow({ sheet, navigate, t })
+                    }
+                    nestedScrollEnabled
+                />
+            )}
         </>
     );
 }

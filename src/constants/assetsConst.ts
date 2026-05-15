@@ -5,6 +5,8 @@ export const ImgAsset = {
     logo: require("@/assets/imgs/logo.png"),
     author: require("@/assets/imgs/author.jpg"),
     logoTransparent: require("@/assets/imgs/logo-transparent.png"),
+    /** White X on transparent; used as media notification stop/exit action when enabled. */
+    notificationExit: require("@/assets/imgs/notification-exit.png"),
     wechatChannel: require("@/assets/imgs/wechat_channel.jpg"),
     // 音质
     quality: {

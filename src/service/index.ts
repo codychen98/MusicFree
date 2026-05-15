@@ -1,6 +1,7 @@
 import Config from "@/core/appConfig";
 import RNTrackPlayer, { Event, State } from "react-native-track-player";
 import TrackPlayer from "@/core/trackPlayer";
+import NativeUtils from "@/native/utils";
 import { musicIsPaused } from "@/utils/trackUtils";
 import PersistStatus from "@/utils/persistStatus";
 
@@ -60,6 +61,11 @@ module.exports = async function () {
     });
 
     RNTrackPlayer.addEventListener(Event.RemoteStop, async () => {
+        if (Config.getConfig("basic.showExitOnNotification")) {
+            await TrackPlayer.reset();
+            NativeUtils.exitApp();
+            return;
+        }
         RNTrackPlayer.stop();
     });
 

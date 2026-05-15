@@ -1467,7 +1467,7 @@
     "@babel/plugin-transform-react-jsx-development" "^7.24.7"
     "@babel/plugin-transform-react-pure-annotations" "^7.24.7"
 
-"@babel/preset-typescript@^7.13.0", "@babel/preset-typescript@^7.16.7", "@babel/preset-typescript@^7.23.0":
+"@babel/preset-typescript@^7.13.0", "@babel/preset-typescript@^7.16.7", "@babel/preset-typescript@^7.17.12", "@babel/preset-typescript@^7.23.0":
   version "7.24.7"
   resolved "https://registry.npmmirror.com/@babel/preset-typescript/-/preset-typescript-7.24.7.tgz"
   integrity sha512-SyXRe3OdWwIwalxDg5UtJnJQO+YPcTfwiIY2B0Xlddh9o7jpWLvv8X1RthIeDOxQ+O1ML5BLPCONToObyVQVuQ==
@@ -7541,11 +7541,6 @@ lighthouse-logger@^1.0.0:
     debug "^2.6.9"
     marky "^1.2.2"
 
-lightningcss-win32-x64-msvc@1.27.0:
-  version "1.27.0"
-  resolved "https://registry.npmmirror.com/lightningcss-win32-x64-msvc/-/lightningcss-win32-x64-msvc-1.27.0.tgz"
-  integrity sha512-/OJLj94Zm/waZShL8nB5jsNj3CfNATLCTyFxZyouilfTmSoLDX7VlVAmhPHoZWVFp4vdmoiEbPEYC8HID3m6yw==
-
 lightningcss@~1.27.0:
   version "1.27.0"
   resolved "https://registry.npmmirror.com/lightningcss/-/lightningcss-1.27.0.tgz"
@@ -9263,6 +9258,13 @@ react-native-device-info@^14.0.4:
   resolved "https://registry.npmmirror.com/react-native-device-info/-/react-native-device-info-14.0.4.tgz"
   integrity sha512-NX0wMAknSDBeFnEnSFQ8kkAcQrFHrG4Cl0mVjoD+0++iaKrOupiGpBXqs8xR0SeJyPC5zpdPl4h/SaBGly6UxA==
 
+react-native-draggable-flatlist@^4.0.3:
+  version "4.0.3"
+  resolved "https://registry.npmjs.org/react-native-draggable-flatlist/-/react-native-draggable-flatlist-4.0.3.tgz"
+  integrity sha512-2F4x5BFieWdGq9SetD2nSAR7s7oQCSgNllYgERRXXtNfSOuAGAVbDb/3H3lP0y5f7rEyNwabKorZAD/SyyNbDw==
+  dependencies:
+    "@babel/preset-typescript" "^7.17.12"
+
 react-native-fast-image@^8.6.3:
   version "8.6.3"
   resolved "https://registry.npmmirror.com/react-native-fast-image/-/react-native-fast-image-8.6.3.tgz"
@@ -9276,7 +9278,7 @@ react-native-fs@^2.20.0:
     base-64 "^0.1.0"
     utf8 "^3.0.0"
 
-react-native-gesture-handler@*, "react-native-gesture-handler@>= 1.0.0", react-native-gesture-handler@~2.25.0:
+react-native-gesture-handler@*, "react-native-gesture-handler@>= 1.0.0", react-native-gesture-handler@>=2.0.0, react-native-gesture-handler@~2.25.0:
   version "2.25.0"
   resolved "https://registry.npmmirror.com/react-native-gesture-handler/-/react-native-gesture-handler-2.25.0.tgz"
   integrity sha512-NPjJi6mislXxvjxQPU9IYwBjb1Uejp8GvAbE1Lhh+xMIMEvmgAvVIp5cz1P+xAbV6uYcRRArm278+tEInGOqWg==
@@ -9334,7 +9336,7 @@ react-native-permissions@^4.1.5:
   resolved "https://registry.npmmirror.com/react-native-permissions/-/react-native-permissions-4.1.5.tgz"
   integrity sha512-r6VMRacASmtRHS+GZ+5HQCp9p9kiE+UU9magHOZCXZLTJitdTuVHWZRrb4v4oqZGU+zAp3mZhTQftuMMv+WLUg==
 
-react-native-reanimated@^3.17.5, "react-native-reanimated@>= 1.0.0", react-native-reanimated@>=2.0.0, react-native-reanimated@>=2.2.0:
+react-native-reanimated@^3.17.5, "react-native-reanimated@>= 1.0.0", react-native-reanimated@>=2.0.0, react-native-reanimated@>=2.2.0, react-native-reanimated@>=2.8.0:
   version "3.17.5"
   resolved "https://registry.npmmirror.com/react-native-reanimated/-/react-native-reanimated-3.17.5.tgz"
   integrity sha512-SxBK7wQfJ4UoWoJqQnmIC7ZjuNgVb9rcY5Xc67upXAFKftWg0rnkknTw6vgwnjRcvYThrjzUVti66XoZdDJGtw==
@@ -9425,7 +9427,7 @@ react-native-webview@*, react-native-webview@^13.13.5:
     escape-string-regexp "^4.0.0"
     invariant "2.2.4"
 
-react-native@*, "react-native@^0.0.0-0 || >=0.60 <1.0", "react-native@>= 0.30.0", "react-native@>= 0.61.5", react-native@>=0.47.0, react-native@>=0.56, react-native@>=0.57, react-native@>=0.59, react-native@>=0.59.0, react-native@>=0.60.0, react-native@>=0.60.0-rc.2, react-native@>=0.70.0, react-native@>=0.71.0, react-native@0.76.5:
+react-native@*, "react-native@^0.0.0-0 || >=0.60 <1.0", "react-native@>= 0.30.0", "react-native@>= 0.61.5", react-native@>=0.47.0, react-native@>=0.56, react-native@>=0.57, react-native@>=0.59, react-native@>=0.59.0, react-native@>=0.60.0, react-native@>=0.60.0-rc.2, react-native@>=0.64.0, react-native@>=0.70.0, react-native@>=0.71.0, react-native@0.76.5:
   version "0.76.5"
   resolved "https://registry.npmmirror.com/react-native/-/react-native-0.76.5.tgz"
   integrity sha512-op2p2kB+lqMF1D7AdX4+wvaR0OPFbvWYs+VBE7bwsb99Cn9xISrLRLAgFflZedQsa5HvnOGrULhtnmItbIKVVw==
