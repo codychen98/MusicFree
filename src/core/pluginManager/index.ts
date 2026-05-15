@@ -28,6 +28,7 @@ import { safeParse } from "@/utils/jsonUtil";
 import { IInjectable } from "@/types/infra";
 import { IAppConfig } from "@/types/core/config";
 import delay from "@/utils/delay";
+import { markWebdavLocalMutation } from "@/core/webdav-sync/bridge";
 
 const pluginsAtom = atom<Plugin[]>([]);
 const pluginCacheStore = getOrCreateMMKV("plugin.cache");
@@ -245,6 +246,7 @@ class PluginManager implements IPluginManager, IInjectable {
                 allPlugins = allPlugins.concat(plugin);
                 this.setPlugins(allPlugins);
 
+                markWebdavLocalMutation();
                 return {
                     success: true,
                     pluginName: plugin.name,
@@ -335,6 +337,7 @@ class PluginManager implements IPluginManager, IInjectable {
                         } catch {}
                     }
                     this.setPlugins(allPlugins);
+                    markWebdavLocalMutation();
                     return {
                         success: true,
                         pluginName: plugin.name,
@@ -387,6 +390,7 @@ class PluginManager implements IPluginManager, IInjectable {
                 await unlink(plugins[targetIndex].path);
                 plugins = plugins.filter(_ => _.hash !== hash);
                 this.setPlugins(plugins);
+                markWebdavLocalMutation();
                 // 防止其他重名
                 if (plugins.every(_ => _.name !== pluginName)) {
                     removeAllMediaExtra(pluginName);
@@ -410,6 +414,7 @@ class PluginManager implements IPluginManager, IInjectable {
             }),
         );
         this.setPlugins([]);
+        markWebdavLocalMutation();
 
         /** 清除空余文件，异步做就可以了 */
         readDir(pathConst.pluginPath)

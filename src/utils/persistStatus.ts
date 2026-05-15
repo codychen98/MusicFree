@@ -38,6 +38,8 @@ interface IPersistStatus {
     "lyric.showTranslation": boolean;
     /** 歌词-详情页字体大小 */
     "lyric.detailFontSize": number;
+    /** Dev: WebDAV bootstrap trace (parity Desktop `localStorage.webdavSyncDebug`) */
+    "app.webdavSyncDebug": boolean;
 }
 
 function set<K extends keyof IPersistStatus>(

@@ -63,6 +63,13 @@ export interface IAppConfigProperties {
     "webdav.url": string;
     "webdav.username": string;
     "webdav.password": string;
+    /** Desktop `backup.webdav.autoSync`; default absent/false until user enables sync UI (later steps). */
+    "webdav.autoSync": boolean;
+    /** Dirty local snapshot not yet reflected on WebDAV (autosync parity with Desktop `backup.webdav.pendingPush`). */
+    "webdav.pendingPush": boolean;
+    "webdav.lastSuccessfulPushAt"?: number;
+    /** Stable id per install; written on first WebDAV upload that attaches syncMeta. */
+    "webdav.backupSourceDeviceId"?: string;
 
     // Debug（保持嵌套结构）
     "debug.errorLog": boolean;

@@ -9,18 +9,26 @@ interface ISimpleDialogProps {
     okText?: string;
     cancelText?: string;
     onOk?: () => void;
+    /** Invoked before hide when cancelling, closing via backdrop, or hardware back — not invoked on Confirm. */
+    onDismissWithoutConfirm?: () => void;
 }
 export default function SimpleDialog(props: ISimpleDialogProps) {
-    const { title, content, onOk, okText, cancelText } = props;
+    const { title, content, onOk, okText, cancelText, onDismissWithoutConfirm } =
+        props;
 
     const { t } = useI18N();
+
+    function dismissWithoutConfirm(): void {
+        onDismissWithoutConfirm?.();
+        hideDialog();
+    }
 
     const actions = onOk
         ? [
             {
                 title: cancelText ?? t("common.cancel"),
                 type: "normal",
-                onPress: hideDialog,
+                onPress: dismissWithoutConfirm,
             },
             {
                 title: okText ?? t("common.confirm"),
@@ -42,7 +50,7 @@ export default function SimpleDialog(props: ISimpleDialogProps) {
         ] as any);
 
     return (
-        <Dialog onDismiss={hideDialog}>
+        <Dialog onDismiss={dismissWithoutConfirm}>
             <Dialog.Title withDivider>{title}</Dialog.Title>
             <Dialog.Content needScroll>{content}</Dialog.Content>
             <Dialog.Actions actions={actions} />

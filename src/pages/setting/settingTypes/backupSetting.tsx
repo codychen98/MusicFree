@@ -1,4 +1,5 @@
 import ListItem, { ListItemHeader } from "@/components/base/listItem";
+import ThemeSwitch from "@/components/base/switch";
 import Backup from "@/core/backup";
 import { ROUTE_PATH, useNavigate } from "@/core/router";
 import Toast from "@/utils/toast";
@@ -11,6 +12,15 @@ import axios from "axios";
 
 import { ResumeMode } from "@/constants/commonConst.ts";
 import Config, { useAppConfig } from "@/core/appConfig";
+import {
+    WEBDAV_REMOTE_BACKUP_FILE,
+    cancelScheduledWebdavUpload,
+    uploadBackupToWebdav,
+} from "@/core/webdav-sync/upload";
+import {
+    clearWebdavPendingPushAfterManualRestore,
+    recordWebdavUploadSuccess,
+} from "@/core/webdav-sync/config";
 import { useI18N } from "@/core/i18n";
 import delay from "@/utils/delay";
 import { writeInChunks } from "@/utils/fileUtils.ts";
@@ -27,6 +37,14 @@ export default function BackupSetting() {
     const webdavUrl = useAppConfig("webdav.url");
     const webdavUsername = useAppConfig("webdav.username");
     const webdavPassword = useAppConfig("webdav.password");
+    const webdavAutoSync = useAppConfig("webdav.autoSync");
+
+    const webdavCredentialsComplete =
+        Boolean(
+            `${webdavUrl ?? ""}`.trim() &&
+                `${webdavUsername ?? ""}`.trim() &&
+                `${webdavPassword ?? ""}`.trim(),
+        );
 
 
     const onBackupToLocal = async () => {
@@ -146,14 +164,16 @@ export default function BackupSetting() {
             password: password,
         });
 
-        if (!(await client.exists("/MusicFree/MusicFreeBackup.json"))) {
+        if (!(await client.exists(WEBDAV_REMOTE_BACKUP_FILE))) {
             Toast.warn(t("toast.backupFileNotFound"));
             return;
         }
 
+        cancelScheduledWebdavUpload();
+
         try {
             const resumeData = await client.getFileContents(
-                "/MusicFree/MusicFreeBackup.json",
+                WEBDAV_REMOTE_BACKUP_FILE,
                 {
                     format: "text",
                 },
@@ -162,6 +182,7 @@ export default function BackupSetting() {
                 resumeData,
                 Config.getConfig("backup.resumeMode"),
             );
+            clearWebdavPendingPushAfterManualRestore();
             Toast.success(t("toast.resumeSuccess"));
         } catch (e: any) {
             Toast.warn(t("toast.resumeFail", { reason: e?.message ?? e }));
@@ -177,24 +198,8 @@ export default function BackupSetting() {
             return;
         }
         try {
-            const client = createClient(url, {
-                authType: AuthType.Password,
-                username: username,
-                password: password,
-            });
-
-            const raw = Backup.backup();
-            if (!(await client.exists("/MusicFree"))) {
-                await client.createDirectory("/MusicFree");
-            }
-            // 临时文件
-            await client.putFileContents(
-                "/MusicFree/MusicFreeBackup.json",
-                raw,
-                {
-                    overwrite: true,
-                },
-            );
+            await uploadBackupToWebdav();
+            recordWebdavUploadSuccess();
             Toast.success(t("toast.backupSuccess"));
         } catch (e: any) {
             Toast.warn(t("toast.backupFail", { reason: e?.message ?? e }));
@@ -287,6 +292,30 @@ export default function BackupSetting() {
                     });
                 }}>
                 <ListItem.Content title={t("backupAndResume.webdavSettings")} />
+            </ListItem>
+            <ListItem withHorizontalPadding heightType="small">
+                <ListItem.Content
+                    title={t("backupAndResume.webdavAutoSync")}
+                    description={
+                        webdavCredentialsComplete
+                            ? undefined
+                            : t("backupAndResume.webdavAutoSyncCredentialsHint")
+                    }
+                />
+                <ThemeSwitch
+                    value={webdavAutoSync === true}
+                    onValueChange={(next: boolean) => {
+                        if (next && !webdavCredentialsComplete) {
+                            Toast.warn(
+                                t(
+                                    "backupAndResume.webdavAutoSyncRequiresCredentials",
+                                ),
+                            );
+                            return;
+                        }
+                        Config.setConfig("webdav.autoSync", next);
+                    }}
+                />
             </ListItem>
             <ListItem withHorizontalPadding onPress={onBackupToWebdav}>
                 <ListItem.Content title={t("backupAndResume.backupToWebdav")} />

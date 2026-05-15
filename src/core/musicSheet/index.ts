@@ -12,6 +12,7 @@ import { nanoid } from "nanoid";
 import { useEffect, useMemo, useState } from "react";
 import migrate, { migrateV2 } from "./migrate.ts";
 import SortedMusicList from "./sortedMusicList.ts";
+import { markWebdavLocalMutation } from "@/core/webdav-sync/bridge";
 import storage from "./storage.ts";
 
 const produce = new Immer({
@@ -172,6 +173,7 @@ class MusicSheetClazz implements IInjectable {
         ee.emit("UpdateSheetBasic", {
             sheetId,
         });
+        markWebdavLocalMutation();
     }
 
 
@@ -217,6 +219,7 @@ class MusicSheetClazz implements IInjectable {
             defaultSortType = SortType.None;
         }
         musicListMap.set(newId, new SortedMusicList([], defaultSortType, true));
+        markWebdavLocalMutation();
         return newId;
     }
 
@@ -278,6 +281,51 @@ class MusicSheetClazz implements IInjectable {
         }
     }
 
+    /** Clear sheet music preserving the sheet shell (covers full replace from backup). */
+    async clearAllMusicInSheet(sheetId: string): Promise<void> {
+        const musicList = this.getSortedMusicListBySheetId(sheetId);
+        const n = musicList.length;
+        if (n === 0) {
+            return;
+        }
+        const indices = Array.from({ length: n }, (_, i) => i);
+        await this.removeMusicByIndex(sheetId, indices);
+    }
+
+    /**
+     * Replace local playlists to match backup (parity with Desktop BackupResume with overwrite).
+     */
+    async resumeSheetsFullOverwrite(sheetsSource: IMusic.IMusicSheetItem[]) {
+        const currentSheets = [...getDefaultStore().get(musicSheetsBaseAtom)];
+
+        const sheets = [...sheetsSource];
+        let importedDefault: IMusic.IMusicSheetItem | undefined;
+        const defaultIdx = sheets.findIndex(it => it.id === _defaultSheet.id);
+        if (defaultIdx !== -1) {
+            importedDefault = sheets[defaultIdx];
+            sheets.splice(defaultIdx, 1);
+        }
+
+        for (let i = 0; i < sheets.length; i++) {
+            const sheet = sheets[i]!;
+            const newSheetId = await this.addSheet(sheet.title || "");
+            await this.addMusic(newSheetId, sheet.musicList ?? []);
+        }
+
+        for (let i = 0; i < currentSheets.length; i++) {
+            const sheet = currentSheets[i]!;
+            if (sheet.id === _defaultSheet.id) {
+                await this.clearAllMusicInSheet(_defaultSheet.id);
+                const items = importedDefault?.musicList ?? [];
+                if (items.length > 0) {
+                    await this.addMusic(_defaultSheet.id, items);
+                }
+            } else {
+                await this.removeSheet(sheet.id);
+            }
+        }
+    }
+
 
     /**
      * 删除歌单
@@ -300,6 +348,7 @@ class MusicSheetClazz implements IInjectable {
         // 修改状态
         getDefaultStore().set(musicSheetsBaseAtom, newSheets);
         musicListMap.delete(sheetId);
+        markWebdavLocalMutation();
     }
 
     /**
@@ -354,6 +403,7 @@ class MusicSheetClazz implements IInjectable {
             sheetId,
             updateType: "length",
         });
+        markWebdavLocalMutation();
     }
 
 
@@ -392,6 +442,7 @@ class MusicSheetClazz implements IInjectable {
             sheetId,
             updateType: "length",
         });
+        markWebdavLocalMutation();
     }
 
 
@@ -427,6 +478,7 @@ class MusicSheetClazz implements IInjectable {
             sheetId,
             updateType: "length",
         });
+        markWebdavLocalMutation();
     }
 
 
@@ -441,6 +493,7 @@ class MusicSheetClazz implements IInjectable {
             sheetId,
             updateType: "resort",
         });
+        markWebdavLocalMutation();
     }
 
     async manualSort(
@@ -458,6 +511,7 @@ class MusicSheetClazz implements IInjectable {
             sheetId,
             updateType: "resort",
         });
+        markWebdavLocalMutation();
     }
 
     getSheetMeta = storage.getSheetMeta;

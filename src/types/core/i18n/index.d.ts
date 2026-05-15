@@ -274,9 +274,14 @@ export interface ILanguageData {
     "backupAndResume.webdavUrl": string; // WebDAV URL
     "backupAndResume.backupToWebdav": string; // 备份到WebDAV
     "backupAndResume.resumeFromWebdav": string; // 从WebDAV恢复
+    "backupAndResume.webdavAutoSync": string;
+    "backupAndResume.webdavAutoSyncCredentialsHint": string;
+    "backupAndResume.webdavAutoSyncRequiresCredentials": string;
     "backupAndResume.resumeMode.append": string; // 附加
     "backupAndResume.resumeMode.overwrite-default": string; // 覆盖（默认）
     "backupAndResume.resumeMode.overwrite": string; // 覆盖
+    "backupAndResume.emptyRemoteDialogTitle": string;
+    "backupAndResume.emptyRemoteDialogBody": string;
 
     // 基本设置相关
     "basicSettings.common": string; // 通用

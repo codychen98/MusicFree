@@ -1,77 +1,123 @@
 /** 备份与恢复 */
 /** 歌单、插件 */
 import { compare } from "compare-versions";
+import { nanoid } from "nanoid";
 import PluginManager from "./pluginManager";
 import MusicSheet from "@/core/musicSheet";
 import { ResumeMode } from "@/constants/commonConst.ts";
+import Config from "./appConfig";
+import { runWithoutWebdavSyncNotify } from "@/core/webdav-sync/suppress";
 
 /**
  * 结果：一份大的json文件
  * {
  *     musicSheets: [],
  *     plugins: [],
+ *     syncMeta?: { updatedAt, sourceDeviceId }  // WebDAV uploads only; tolerated on restore
  * }
  */
 
-interface IBackJson {
+export interface IBackupSyncMeta {
+    updatedAt: number;
+    sourceDeviceId?: string;
+}
+
+interface IBackupJson {
     musicSheets: IMusic.IMusicSheetItem[];
     plugins: Array<{ srcUrl: string; version: string }>;
 }
 
-function backup() {
+function buildBackupPayload(): IBackupJson {
     const musicSheets = MusicSheet.backupSheets();
     const plugins = PluginManager.getEnabledPlugins();
-    const normalizedPlugins = plugins.map(_ => ({
-        srcUrl: _.instance.srcUrl,
-        version: _.instance.version,
-    }));
+    const normalizedPlugins = plugins
+        .map(_ => ({
+            srcUrl: _.instance.srcUrl,
+            version: _.instance.version ?? "0.0.0",
+        }))
+        .filter(
+            (
+                p,
+            ): p is { srcUrl: string; version: string } =>
+                typeof p.srcUrl === "string" && p.srcUrl.length > 0,
+        );
 
-    return JSON.stringify({
-        musicSheets: musicSheets,
+    return {
+        musicSheets,
         plugins: normalizedPlugins,
-    });
+    };
+}
+
+function backup() {
+    return JSON.stringify(buildBackupPayload());
+}
+
+/** Full JSON written to WebDAV: base payload plus syncMeta bump (parity with Desktop D2). */
+function stringifyWebdavBackupWithSyncMeta(): string {
+    let sourceDeviceId = Config.getConfig("webdav.backupSourceDeviceId");
+    if (!sourceDeviceId) {
+        sourceDeviceId = nanoid();
+        Config.setConfig("webdav.backupSourceDeviceId", sourceDeviceId);
+    }
+    const syncMeta: IBackupSyncMeta = {
+        updatedAt: Date.now(),
+        sourceDeviceId,
+    };
+    return JSON.stringify({ ...buildBackupPayload(), syncMeta });
+}
+
+interface IBackupResumeOptions {
+    /** Match Desktop `BackupResume.resume(..., overwrite: true)` for WebDAV auto-pull. */
+    fullSheetOverwrite?: boolean;
 }
 
 async function resume(
     raw: string | Object,
     resumeMode: ResumeMode = ResumeMode.Append,
+    options?: IBackupResumeOptions,
 ) {
-    let obj: IBackJson;
-    if (typeof raw === "string") {
-        obj = JSON.parse(raw);
-    } else {
-        obj = raw as IBackJson;
-    }
-
-    const { plugins, musicSheets } = obj ?? {};
-    /** 恢复插件 */
-    const validPlugins = PluginManager.getEnabledPlugins();
-    const resumePlugins = plugins?.map(_ => {
-        // 校验是否安装过: 同源且本地版本更高就忽略掉
-        if (
-            validPlugins.find(
-                plugin =>
-                    plugin.instance.srcUrl === _.srcUrl &&
-                    compare(
-                        plugin.instance.version ?? "0.0.0",
-                        _.version ?? "0.0.1",
-                        ">=",
-                    ),
-            )
-        ) {
-            return;
+    return runWithoutWebdavSyncNotify(async () => {
+        let obj: IBackupJson;
+        if (typeof raw === "string") {
+            obj = JSON.parse(raw);
+        } else {
+            obj = raw as IBackupJson;
         }
-        return PluginManager.installPluginFromUrl(_.srcUrl);
+
+        const { plugins, musicSheets } = obj ?? {};
+        const sheetsPayload = Array.isArray(musicSheets) ? musicSheets : [];
+        /** 恢复插件 */
+        const validPlugins = PluginManager.getEnabledPlugins();
+        const resumePlugins = plugins?.map(_ => {
+            // 校验是否安装过: 同源且本地版本更高就忽略掉
+            if (
+                validPlugins.find(
+                    plugin =>
+                        plugin.instance.srcUrl === _.srcUrl &&
+                        compare(
+                            plugin.instance.version ?? "0.0.0",
+                            _.version ?? "0.0.1",
+                            ">=",
+                        ),
+                )
+            ) {
+                return;
+            }
+            return PluginManager.installPluginFromUrl(_.srcUrl);
+        });
+
+        /** 恢复歌单 */
+        const resumeMusicSheets = options?.fullSheetOverwrite
+            ? MusicSheet.resumeSheetsFullOverwrite(sheetsPayload)
+            : MusicSheet.resumeSheets(sheetsPayload, resumeMode);
+
+        return Promise.all([...(resumePlugins ?? []), resumeMusicSheets]);
     });
-
-    /** 恢复歌单 */
-    const resumeMusicSheets = MusicSheet.resumeSheets(musicSheets, resumeMode);
-
-    return Promise.all([...(resumePlugins ?? []), resumeMusicSheets]);
 }
 
 const Backup = {
     backup,
     resume,
+    stringifyWebdavBackupWithSyncMeta,
 };
 export default Backup;

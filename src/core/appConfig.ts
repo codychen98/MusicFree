@@ -181,6 +181,9 @@ class AppConfig implements IAppConfig {
         } else {
             configStore.set(key, safeStringify(value));
         }
+        if (key === "webdav.autoSync" && value === false) {
+            configStore.delete("webdav.pendingPush");
+        }
     }
 
     getConfig<K extends keyof IAppConfigProperties>(

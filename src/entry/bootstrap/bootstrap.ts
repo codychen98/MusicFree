@@ -5,6 +5,9 @@ import { ImgAsset } from "@/constants/assetsConst";
 import { emptyFunction, localPluginHash, supportLocalMediaType } from "@/constants/commonConst";
 import pathConst from "@/constants/pathConst";
 import Config from "@/core/appConfig";
+import { runWebdavBootstrapSync } from "@/core/webdav-sync/bootstrap";
+import { runWithoutWebdavSyncNotify } from "@/core/webdav-sync/suppress";
+import { setupWebdavAutoSync } from "@/core/webdav-sync/upload";
 import downloader, { DownloadFailReason, DownloaderEvent } from "@/core/downloader";
 import LocalMusicSheet from "@/core/localMusicSheet";
 import lyricManager from "@/core/lyricManager";
@@ -93,6 +96,7 @@ async function bootstrapImpl() {
             logger.mark("musicHistory");
         }),
     ]);
+    setupWebdavAutoSync();
     trace("配置初始化完成");
     logger.mark("配置初始化完成");
 
@@ -100,6 +104,8 @@ async function bootstrapImpl() {
     await PluginManager.setup();
     logger.mark("插件初始化完成");
     trace("插件初始化完成");
+
+    void runWebdavBootstrapSync();
 
     await initTrackPlayer(logger).catch(err => {
         // 初始化播放器出错，延迟初始化
@@ -211,14 +217,17 @@ async function extraMakeup() {
             const now = Date.now();
             if (Math.abs(now - lastUpdated) > 86400000) {
                 PersistStatus.set("app.pluginUpdateTime", now);
-                const plugins = PluginManager.getEnabledPlugins();
-                for (let i = 0; i < plugins.length; ++i) {
-                    const srcUrl = plugins[i].instance.srcUrl;
-                    if (srcUrl) {
-                        // 静默失败
-                        await PluginManager.installPluginFromUrl(srcUrl).catch(emptyFunction);
+                await runWithoutWebdavSyncNotify(async () => {
+                    const plugins = PluginManager.getEnabledPlugins();
+                    for (let i = 0; i < plugins.length; ++i) {
+                        const srcUrl = plugins[i].instance.srcUrl;
+                        if (srcUrl) {
+                            await PluginManager.installPluginFromUrl(
+                                srcUrl,
+                            ).catch(emptyFunction);
+                        }
                     }
-                }
+                });
             }
         }
     } catch { }
