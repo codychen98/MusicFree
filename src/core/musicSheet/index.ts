@@ -332,9 +332,12 @@ class MusicSheetClazz implements IInjectable {
             sheets.splice(defaultIdx, 1);
         }
 
+        /** Backup order for custom sheets (addSheet inserts each new row at index 1, so order is wrong until we reorder). */
+        const newCustomSheetIdsInBackupOrder: string[] = [];
         for (let i = 0; i < sheets.length; i++) {
             const sheet = sheets[i]!;
             const newSheetId = await this.addSheet(sheet.title || "");
+            newCustomSheetIdsInBackupOrder.push(newSheetId);
             await this.addMusic(newSheetId, sheet.musicList ?? []);
         }
 
@@ -350,6 +353,22 @@ class MusicSheetClazz implements IInjectable {
                 await this.removeSheet(sheet.id);
             }
         }
+
+        const after = getDefaultStore().get(musicSheetsBaseAtom);
+        const byId = new Map(after.map(s => [s.id, s]));
+        const defaultRow = after.find(s => s.id === _defaultSheet.id);
+        if (!defaultRow) {
+            return;
+        }
+        const restOrdered: IMusic.IMusicSheetItemBase[] = [];
+        for (const id of newCustomSheetIdsInBackupOrder) {
+            const row = byId.get(id);
+            if (!row) {
+                return;
+            }
+            restOrdered.push(row);
+        }
+        await this.reorderSheets([defaultRow, ...restOrdered]);
     }
 
 
