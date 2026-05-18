@@ -32,6 +32,9 @@ const defaultLyricState = {
     hasTranslation: false,
 };
 
+/** Abort hung plugin lyric fetches so EOF/stuck playback does not leave 加载中... forever. */
+const LYRIC_FETCH_TIMEOUT_MS = 15_000;
+
 const lyricStateAtom = atom<ILyricState>(defaultLyricState);
 const currentLyricItemAtom = atom<IParsedLrcItem | null>(null);
 
@@ -246,6 +249,29 @@ class LyricManager implements IInjectable {
         }
     }
 
+    private withLyricFetchTimeout<T>(promise: Promise<T>): Promise<T | undefined> {
+        return new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(undefined), LYRIC_FETCH_TIMEOUT_MS);
+            promise
+                .then((value) => {
+                    clearTimeout(timer);
+                    resolve(value);
+                })
+                .catch(() => {
+                    clearTimeout(timer);
+                    resolve(undefined);
+                });
+        });
+    }
+
+    /** Clear loading when a fetch is abandoned and nothing else owns lyric state yet. */
+    private clearLyricLoadingIfFetchAbandoned(requestedMusic: IMusic.IMusicItem) {
+        const current = this.trackPlayer.currentMusic;
+        if (!current || isSameMediaItem(current, requestedMusic)) {
+            this.setLyricAsNoLyricState();
+        }
+    }
+
     private async refreshLyric(skipFetchLyricSourceIfSame: boolean = true, ignoreProgress: boolean = false) {
         const currentMusicItem = this.trackPlayer.currentMusic;
 
@@ -264,11 +290,18 @@ class LyricManager implements IInjectable {
                 // 重置歌词状态
                 this.setLyricAsLoadingState();
 
-                lrcSource = (await this.pluginManager.getByMedia(currentMusicItem)?.methods?.getLyric(currentMusicItem)) ?? null;
+                const getLyric = this.pluginManager
+                    .getByMedia(currentMusicItem)
+                    ?.methods?.getLyric(currentMusicItem);
+                lrcSource =
+                    getLyric != null
+                        ? (await this.withLyricFetchTimeout(getLyric)) ?? null
+                        : null;
             }
 
             // 切换到其他歌曲了, 直接返回
             if (!this.trackPlayer.isCurrentMusic(currentMusicItem)) {
+                this.clearLyricLoadingIfFetchAbandoned(currentMusicItem);
                 return;
             }
 
@@ -277,11 +310,15 @@ class LyricManager implements IInjectable {
                 // 重置歌词状态
                 this.setLyricAsLoadingState();
 
-                lrcSource = await this.searchSimilarLyric(currentMusicItem);
+                lrcSource =
+                    (await this.withLyricFetchTimeout(
+                        this.searchSimilarLyric(currentMusicItem),
+                    )) ?? null;
             }
 
             // 切换到其他歌曲了, 直接返回
             if (!this.trackPlayer.isCurrentMusic(currentMusicItem)) {
+                this.clearLyricLoadingIfFetchAbandoned(currentMusicItem);
                 return;
             }
 

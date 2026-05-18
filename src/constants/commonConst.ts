@@ -13,6 +13,11 @@ export const localPluginPlatform = "本地";
 export const localPluginHash = "local-plugin-hash";
 
 export const internalFakeSoundKey = "fake-key";
+/** Legacy sentinel URL (pre–silent clip); still matched for migration. */
+export const legacyFakeAudioUrl = "musicfree://fake-audio";
+export const androidTrackPlayerPackageId = "fun.upup.musicfree";
+export const androidSentinelRawName = "silent_1s";
+export const androidSentinelAudioUrl = `android.resource://${androidTrackPlayerPackageId}/raw/${androidSentinelRawName}`;
 
 const emptyFunction = () => {};
 Object.freeze(emptyFunction);

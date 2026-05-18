@@ -1,6 +1,8 @@
 import { getCurrentDialog, showDialog } from "@/components/dialogs/useDialog";
 import {
+    androidSentinelAudioUrl,
     internalFakeSoundKey,
+    legacyFakeAudioUrl,
     sortIndexSymbol,
     timeStampSymbol,
 } from "@/constants/commonConst";
@@ -8,6 +10,7 @@ import { MusicRepeatMode } from "@/constants/repeatModeConst";
 import delay from "@/utils/delay";
 import getUrlExt from "@/utils/getUrlExt";
 import { errorLog, trace } from "@/utils/log";
+import { logQueueSnapshot } from "@/utils/trackPlayerDebug";
 import { createMediaIndexMap } from "@/utils/mediaIndexMap";
 import {
     getLocalPath,
@@ -21,6 +24,7 @@ import EventEmitter from "eventemitter3";
 import { produce } from "immer";
 import { atom, getDefaultStore, useAtomValue } from "jotai";
 import shuffle from "lodash.shuffle";
+import { Platform } from "react-native";
 import ReactNativeTrackPlayer, {
     Event,
     State,
@@ -65,6 +69,8 @@ class TrackPlayer extends EventEmitter<{
     private currentIndex = -1;
     // 音乐播放器服务是否启动
     private serviceInited = false;
+    /** Prevents double auto-advance when sentinel + queue-ended/state-ended fire together. */
+    private isAdvancingQueue = false;
     // 播放队列索引map
     private playListIndexMap = createMediaIndexMap([] as IMusic.IMusicItem[]);
 
@@ -76,7 +82,10 @@ class TrackPlayer extends EventEmitter<{
         [MusicRepeatMode.SINGLE]: MusicRepeatMode.QUEUE,
         [MusicRepeatMode.QUEUE]: MusicRepeatMode.SHUFFLE,
     };
-    private static fakeAudioUrl = "musicfree://fake-audio";
+    private static fakeAudioUrl =
+        Platform.OS === "android"
+            ? androidSentinelAudioUrl
+            : legacyFakeAudioUrl;
     private static proposedAudioUrl = "musicfree://proposed-audio";
 
     constructor() {
@@ -189,29 +198,50 @@ class TrackPlayer extends EventEmitter<{
                 Event.PlaybackActiveTrackChanged,
                 async evt => {
                     const sentinelMatched =
-                        evt.index === 1 &&
-                        evt.lastIndex === 0 &&
-                        evt.track?.url === TrackPlayer.fakeAudioUrl;
-                    trace("PlaybackActiveTrackChanged", {
+                        TrackPlayer.matchesSentinelTransition(evt);
+                    const trackInternalKey = (
+                        evt.track as (Track & { $?: string }) | undefined
+                    )?.$;
+                    await logQueueSnapshot("PlaybackActiveTrackChanged", {
                         index: evt.index,
                         lastIndex: evt.lastIndex,
                         trackUrl: evt.track?.url,
+                        trackInternalKey,
                         fakeAudioUrl: TrackPlayer.fakeAudioUrl,
                         sentinelMatched,
                     });
-                    if (sentinelMatched) {
-                        trace("队列末尾，播放下一首");
-                        this.emit(TrackPlayerEvents.PlayEnd);
-                        if (
-                            this.repeatMode ===
-                            MusicRepeatMode.SINGLE
-                        ) {
-                            await this.play(null, true);
-                        } else {
-                            // 当前生效的歌曲是下一曲的标记
-                            await this.skipToNext();
-                        }
+                    if (
+                        evt.index === 1 &&
+                        evt.lastIndex === 0 &&
+                        !sentinelMatched
+                    ) {
+                        await this.repairSentinelQueueAtIndexOne(evt);
                     }
+                    if (sentinelMatched) {
+                        await this.handlePlaybackEnded("sentinel");
+                    }
+                },
+            );
+
+            ReactNativeTrackPlayer.addEventListener(
+                Event.PlaybackQueueEnded,
+                async evt => {
+                    await logQueueSnapshot("PlaybackQueueEnded", {
+                        track: evt.track,
+                        position: evt.position,
+                    });
+                    await this.handlePlaybackEnded("PlaybackQueueEnded");
+                },
+            );
+
+            ReactNativeTrackPlayer.addEventListener(
+                Event.PlaybackState,
+                async playbackState => {
+                    if (playbackState.state !== State.Ended) {
+                        return;
+                    }
+                    await logQueueSnapshot("PlaybackState:Ended");
+                    await this.handlePlaybackEnded("PlaybackState:Ended");
                 },
             );
 
@@ -219,6 +249,10 @@ class TrackPlayer extends EventEmitter<{
                 Event.PlaybackError,
                 async e => {
                     errorLog("播放出错", e.message);
+                    await logQueueSnapshot("PlaybackError", {
+                        message: e.message,
+                        code: e.code,
+                    });
                     // WARNING: 不稳定，报错的时候有可能track已经变到下一首歌去了
                     const currentTrack =
                         await ReactNativeTrackPlayer.getActiveTrack();
@@ -233,7 +267,8 @@ class TrackPlayer extends EventEmitter<{
                     }
 
                     if (
-                        currentTrack?.url !== TrackPlayer.fakeAudioUrl && currentTrack?.url !== TrackPlayer.proposedAudioUrl &&
+                        !TrackPlayer.isSentinelUrl(currentTrack?.url) &&
+                        currentTrack?.url !== TrackPlayer.proposedAudioUrl &&
                         (await ReactNativeTrackPlayer.getActiveTrackIndex()) === 0 &&
                         e.message &&
                         e.message !== "android-io-file-not-found"
@@ -405,6 +440,11 @@ class TrackPlayer extends EventEmitter<{
         musicItem?: IMusic.IMusicItem | null,
         forcePlay?: boolean,
     ): Promise<void> {
+        await logQueueSnapshot("play:start", {
+            musicId: musicItem?.id,
+            musicTitle: musicItem?.title,
+            forcePlay,
+        });
         try {
             // 如果不传参，默认是播放当前音乐
             if (!musicItem) {
@@ -429,19 +469,14 @@ class TrackPlayer extends EventEmitter<{
             if (this.isCurrentMusic(musicItem)) {
                 // 获取底层播放器中的track
                 const currentTrack = await ReactNativeTrackPlayer.getTrack(0);
-                // 2.1 如果当前有源
+                // 2.1 如果当前有真实可播放源（非 proposed / fake 占位）
                 if (
-                    currentTrack?.url &&
+                    TrackPlayer.isRealPlayableUrl(currentTrack?.url) &&
                     isSameMediaItem(
                         musicItem,
                         currentTrack as IMusic.IMusicItem,
                     )
                 ) {
-                    const currentActiveIndex =
-                        await ReactNativeTrackPlayer.getActiveTrackIndex();
-                    if (currentActiveIndex !== 0) {
-                        await ReactNativeTrackPlayer.skip(0);
-                    }
                     if (forcePlay) {
                         // 2.1.1 强制重新开始
                         await this.seekTo(0);
@@ -450,11 +485,18 @@ class TrackPlayer extends EventEmitter<{
                         await ReactNativeTrackPlayer.getPlaybackState()
                     ).state;
                     if (currentState === State.Stopped) {
-                        await this.setTrackSource(currentTrack);
-                    }
-                    if (currentState !== State.Playing) {
-                        // 2.1.2 恢复播放
-                        await ReactNativeTrackPlayer.play();
+                        await this.setTrackSource(currentTrack as Track);
+                    } else {
+                        const realTrack = this.patchMediaArtwork(
+                            currentTrack as Track,
+                        );
+                        if (realTrack) {
+                            await this.ensureSentinelQueue(realTrack);
+                        }
+                        if (currentState !== State.Playing) {
+                            // 2.1.2 恢复播放
+                            await ReactNativeTrackPlayer.play();
+                        }
                     }
                     // 这种情况下，播放队列和当前歌曲都不需要变化
                     return;
@@ -628,6 +670,11 @@ class TrackPlayer extends EventEmitter<{
             } else if (message === PlayFailReason.PLAY_LIST_IS_EMPTY) {
                 // 队列是空的，不应该出现这种情况
             }
+        } finally {
+            await logQueueSnapshot("play:end", {
+                musicId: musicItem?.id,
+                musicTitle: musicItem?.title,
+            });
         }
     }
 
@@ -650,12 +697,17 @@ class TrackPlayer extends EventEmitter<{
     }
 
     async skipToNext(): Promise<void> {
-        if (this.isPlayListEmpty()) {
-            this.setCurrentMusic(null);
-            return;
-        }
+        await logQueueSnapshot("skipToNext:start");
+        try {
+            if (this.isPlayListEmpty()) {
+                this.setCurrentMusic(null);
+                return;
+            }
 
-        await this.play(this.getPlayListMusicAt(this.currentIndex + 1), true);
+            await this.play(this.getPlayListMusicAt(this.currentIndex + 1), true);
+        } finally {
+            await logQueueSnapshot("skipToNext:end");
+        }
     }
 
     async skipToPrevious(): Promise<void> {
@@ -805,15 +857,26 @@ class TrackPlayer extends EventEmitter<{
 
     // 设置音源
     private async setTrackSource(track: Track, autoPlay = true) {
-        const clonedTrack = this.patchMediaArtwork(track);
-        if (!clonedTrack) {
-            return;
-        }
-        await ReactNativeTrackPlayer.setQueue([clonedTrack, this.getFakeNextTrack()]);
-        PersistStatus.set("music.musicItem", track as IMusic.IMusicItem);
-        PersistStatus.set("music.progress", 0);
-        if (autoPlay) {
-            await ReactNativeTrackPlayer.play();
+        await logQueueSnapshot("setTrackSource:start", {
+            trackUrl: track.url,
+            autoPlay,
+        });
+        try {
+            const clonedTrack = this.patchMediaArtwork(track);
+            if (!clonedTrack) {
+                return;
+            }
+            await this.ensureSentinelQueue(clonedTrack);
+            PersistStatus.set("music.musicItem", track as IMusic.IMusicItem);
+            PersistStatus.set("music.progress", 0);
+            if (autoPlay) {
+                await ReactNativeTrackPlayer.play();
+            }
+        } finally {
+            await logQueueSnapshot("setTrackSource:end", {
+                trackUrl: track.url,
+                autoPlay,
+            });
         }
     }
 
@@ -883,6 +946,62 @@ class TrackPlayer extends EventEmitter<{
         });
     }
 
+    private static isSentinelUrl(url?: string): boolean {
+        return (
+            url === TrackPlayer.fakeAudioUrl || url === legacyFakeAudioUrl
+        );
+    }
+
+    private static isRealPlayableUrl(url?: string): boolean {
+        return Boolean(
+            url &&
+            !TrackPlayer.isSentinelUrl(url) &&
+            url !== TrackPlayer.proposedAudioUrl,
+        );
+    }
+
+    private static isSentinelTrack(track?: Track | null): boolean {
+        if (!track) {
+            return false;
+        }
+        const extended = track as Track & { $?: string };
+        return (
+            TrackPlayer.isSentinelUrl(track.url) ||
+            extended.$ === internalFakeSoundKey
+        );
+    }
+
+    private static matchesSentinelTransition(evt: {
+        index?: number;
+        lastIndex?: number;
+        track?: Track;
+    }): boolean {
+        return (
+            evt.index === 1 &&
+            evt.lastIndex === 0 &&
+            TrackPlayer.isSentinelTrack(evt.track)
+        );
+    }
+
+    private async ensureSentinelQueue(realTrack: Track): Promise<void> {
+        const queue = await ReactNativeTrackPlayer.getQueue();
+        const needsRepair =
+            queue.length !== 2 ||
+            !TrackPlayer.isSentinelUrl(queue[1]?.url) ||
+            queue[0]?.url !== realTrack.url;
+        if (needsRepair) {
+            await ReactNativeTrackPlayer.setQueue([
+                realTrack,
+                this.getFakeNextTrack(),
+            ]);
+        }
+        const activeIndex =
+            await ReactNativeTrackPlayer.getActiveTrackIndex();
+        if (activeIndex !== 0) {
+            await ReactNativeTrackPlayer.skip(0);
+        }
+    }
+
     private getFakeNextTrack() {
         let track: Track | undefined;
         const repeatMode = this.repeatMode;
@@ -915,6 +1034,93 @@ class TrackPlayer extends EventEmitter<{
         if (!this.configService.getConfig("basic.autoStopWhenError")) {
             await delay(500);
             await this.skipToNext();
+        }
+    }
+
+    /**
+     * EOF fallback when the fake-sentinel track never becomes active (e.g. plugin
+     * stream reloads index 0 at end). Skip when active URL is fake/proposed unless
+     * `reason === "sentinel"` (PlaybackActiveTrackChanged on the fake track).
+     */
+    private async handlePlaybackEnded(reason: string): Promise<void> {
+        if (this.isAdvancingQueue) {
+            return;
+        }
+
+        const fromSentinel = reason === "sentinel";
+        const activeTrack = await ReactNativeTrackPlayer.getActiveTrack();
+        const activeUrl = activeTrack?.url;
+        if (
+            !fromSentinel &&
+            (TrackPlayer.isSentinelUrl(activeUrl) ||
+                activeUrl === TrackPlayer.proposedAudioUrl)
+        ) {
+            return;
+        }
+
+        if (this.isPlayListEmpty() || !this.currentMusic) {
+            return;
+        }
+
+        await logQueueSnapshot("handlePlaybackEnded", { reason });
+        if (fromSentinel) {
+            trace("队列末尾，播放下一首");
+        }
+        trace(
+            "handlePlaybackEnded",
+            JSON.stringify({
+                reason,
+                repeatMode: this.repeatMode,
+                currentIndex: this.currentIndex,
+                playListLength: this.playList.length,
+            }),
+        );
+
+        this.isAdvancingQueue = true;
+        try {
+            this.emit(TrackPlayerEvents.PlayEnd);
+            if (this.repeatMode === MusicRepeatMode.SINGLE) {
+                await this.play(null, true);
+            } else {
+                await this.skipToNext();
+            }
+        } finally {
+            this.isAdvancingQueue = false;
+        }
+    }
+
+    /** Index 1 reached but track is not the fake sentinel — repair queue only. */
+    private async repairSentinelQueueAtIndexOne(evt: {
+        track?: Track;
+    }): Promise<void> {
+        const trackUrl = evt.track?.url;
+        if (
+            trackUrl !== TrackPlayer.proposedAudioUrl &&
+            !TrackPlayer.isRealPlayableUrl(trackUrl)
+        ) {
+            return;
+        }
+
+        trace(
+            "PlaybackActiveTrackChanged:sentinelMismatch",
+            JSON.stringify({
+                trackUrl,
+                proposedAudioUrl: TrackPlayer.proposedAudioUrl,
+            }),
+        );
+
+        const track0 = await ReactNativeTrackPlayer.getTrack(0);
+        if (
+            !track0 ||
+            !TrackPlayer.isRealPlayableUrl(track0.url) ||
+            !isSameMediaItem(track0 as IMusic.IMusicItem, this.currentMusic)
+        ) {
+            return;
+        }
+
+        const realTrack = this.patchMediaArtwork(track0 as Track);
+        if (realTrack) {
+            await this.ensureSentinelQueue(realTrack);
         }
     }
 
