@@ -263,6 +263,7 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
             } else {
                 this.markTaskAsError(musicItem, DownloadFailReason.Unknown, e);
             }
+            this.downloadNextPendingTask();
             return;
         }
 
@@ -294,7 +295,8 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
                 await mkdirR(folder);
             }
         } catch (e: any) {
-            this.emit(DownloaderEvent.DownloadTaskError, DownloadFailReason.NoWritePermission, musicItem, e);
+            this.markTaskAsError(musicItem, DownloadFailReason.NoWritePermission, e);
+            this.downloadNextPendingTask();
             return;
         }
 
@@ -342,19 +344,21 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
             this.markTaskAsCompleted(musicItem);
         } catch (e: any) {
             this.markTaskAsError(musicItem, DownloadFailReason.Unknown, e);
-        }
+        } finally {
+            try {
+                await unlink(cacheDownloadPath);
+            } catch { }
 
-        // 清理工作
-        await unlink(cacheDownloadPath);
-        this.downloadNextPendingTask();
+            this.downloadNextPendingTask();
 
-        // 如果任务状态是完成，则从队列中移除
-        const key = getMediaUniqueKey(musicItem);
-        if (downloadTasks.get(key)?.status === DownloadStatus.Completed) {
-            downloadTasks.delete(key);
-            const downloadQueue = getDefaultStore().get(downloadQueueAtom);
-            const newDownloadQueue = downloadQueue.filter(item => !isSameMediaItem(item, musicItem));
-            getDefaultStore().set(downloadQueueAtom, newDownloadQueue);
+            // 如果任务状态是完成，则从队列中移除
+            const key = getMediaUniqueKey(musicItem);
+            if (downloadTasks.get(key)?.status === DownloadStatus.Completed) {
+                downloadTasks.delete(key);
+                const downloadQueue = getDefaultStore().get(downloadQueueAtom);
+                const newDownloadQueue = downloadQueue.filter(item => !isSameMediaItem(item, musicItem));
+                getDefaultStore().set(downloadQueueAtom, newDownloadQueue);
+            }
         }
     }
 
