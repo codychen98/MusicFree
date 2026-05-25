@@ -105,7 +105,7 @@ async function bootstrapImpl() {
     logger.mark("插件初始化完成");
     trace("插件初始化完成");
 
-    void runWebdavBootstrapSync();
+    await runWebdavBootstrapSync();
 
     await initTrackPlayer(logger).catch(err => {
         // 初始化播放器出错，延迟初始化

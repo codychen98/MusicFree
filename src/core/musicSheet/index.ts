@@ -13,7 +13,32 @@ import { useEffect, useMemo, useState } from "react";
 import migrate, { migrateV2 } from "./migrate.ts";
 import SortedMusicList from "./sortedMusicList.ts";
 import { markWebdavLocalMutation } from "@/core/webdav-sync/bridge";
+import { WEBDAV_MUSIC_PLUGIN_PLATFORM } from "@/core/webdav-download/config";
 import storage from "./storage.ts";
+
+/** When applying remote backup, keep one row per title+artist (WebDAV wins over stream ids). */
+function dedupeMusicListForRemoteRestore(
+    items: IMusic.IMusicItem[],
+): IMusic.IMusicItem[] {
+    const byKey = new Map<string, IMusic.IMusicItem>();
+    const rank = (item: IMusic.IMusicItem): number => {
+        if (item.platform === WEBDAV_MUSIC_PLUGIN_PLATFORM) {
+            return 3;
+        }
+        if (item.platform === localPluginPlatform) {
+            return 1;
+        }
+        return 2;
+    };
+    for (const item of items) {
+        const key = `${item.title}\u0000${item.artist}`;
+        const prev = byKey.get(key);
+        if (!prev || rank(item) > rank(prev)) {
+            byKey.set(key, item);
+        }
+    }
+    return [...byKey.values()];
+}
 
 const produce = new Immer({
     autoFreeze: false,
@@ -320,55 +345,96 @@ class MusicSheetClazz implements IInjectable {
 
     /**
      * Replace local playlists to match backup (parity with Desktop BackupResume with overwrite).
+     * Atomic apply: drop every local sheet/track not in the remote payload (no add-then-delete).
      */
     async resumeSheetsFullOverwrite(sheetsSource: IMusic.IMusicSheetItem[]) {
-        const currentSheets = [...getDefaultStore().get(musicSheetsBaseAtom)];
+        const incoming = Array.isArray(sheetsSource) ? sheetsSource : [];
+        const previousSheetIds = [...musicListMap.keys()];
 
-        const sheets = [...sheetsSource];
-        let importedDefault: IMusic.IMusicSheetItem | undefined;
-        const defaultIdx = sheets.findIndex(it => it.id === _defaultSheet.id);
-        if (defaultIdx !== -1) {
-            importedDefault = sheets[defaultIdx];
-            sheets.splice(defaultIdx, 1);
-        }
-
-        /** Backup order for custom sheets (addSheet inserts each new row at index 1, so order is wrong until we reorder). */
-        const newCustomSheetIdsInBackupOrder: string[] = [];
-        for (let i = 0; i < sheets.length; i++) {
-            const sheet = sheets[i]!;
-            const newSheetId = await this.addSheet(sheet.title || "");
-            newCustomSheetIdsInBackupOrder.push(newSheetId);
-            await this.addMusic(newSheetId, sheet.musicList ?? []);
-        }
-
-        for (let i = 0; i < currentSheets.length; i++) {
-            const sheet = currentSheets[i]!;
+        let defaultPayload: IMusic.IMusicSheetItem | undefined;
+        const customPayloads: IMusic.IMusicSheetItem[] = [];
+        for (const sheet of incoming) {
+            if (!sheet) {
+                continue;
+            }
             if (sheet.id === _defaultSheet.id) {
-                await this.clearAllMusicInSheet(_defaultSheet.id);
-                const items = importedDefault?.musicList ?? [];
-                if (items.length > 0) {
-                    await this.addMusic(_defaultSheet.id, items);
-                }
+                defaultPayload = sheet;
             } else {
-                await this.removeSheet(sheet.id);
+                customPayloads.push(sheet);
             }
         }
 
-        const after = getDefaultStore().get(musicSheetsBaseAtom);
-        const byId = new Map(after.map(s => [s.id, s]));
-        const defaultRow = after.find(s => s.id === _defaultSheet.id);
-        if (!defaultRow) {
-            return;
+        const defaultMusic = dedupeMusicListForRemoteRestore(
+            defaultPayload?.musicList ?? [],
+        );
+        const defaultSortType =
+            (storage.getSheetMeta(_defaultSheet.id, "sort") as SortType) ||
+            SortType.None;
+
+        const newSheetBases: IMusic.IMusicSheetItemBase[] = [
+            {
+                ..._defaultSheet,
+                worksNum: defaultMusic.length,
+            },
+        ];
+        const nextMap = new Map<string, SortedMusicList>();
+        nextMap.set(
+            _defaultSheet.id,
+            new SortedMusicList(defaultMusic, defaultSortType, true),
+        );
+
+        for (const sheet of customPayloads) {
+            const sheetId =
+                typeof sheet.id === "string" &&
+                sheet.id.length > 0 &&
+                sheet.id !== _defaultSheet.id
+                    ? sheet.id
+                    : nanoid();
+            const musicList = dedupeMusicListForRemoteRestore(
+                sheet.musicList ?? [],
+            );
+            const sortType =
+                (storage.getSheetMeta(sheetId, "sort") as SortType) ||
+                SortType.None;
+            newSheetBases.push({
+                id: sheetId,
+                title: sheet.title || "",
+                platform: sheet.platform ?? localPluginPlatform,
+                coverImg: sheet.coverImg,
+                worksNum: musicList.length,
+                createAt: sheet.createAt ?? Date.now(),
+            });
+            nextMap.set(
+                sheetId,
+                new SortedMusicList(musicList, sortType, true),
+            );
         }
-        const restOrdered: IMusic.IMusicSheetItemBase[] = [];
-        for (const id of newCustomSheetIdsInBackupOrder) {
-            const row = byId.get(id);
-            if (!row) {
-                return;
+
+        const activeIds = new Set(nextMap.keys());
+        for (const oldId of previousSheetIds) {
+            if (!activeIds.has(oldId)) {
+                storage.removeMusicList(oldId);
             }
-            restOrdered.push(row);
         }
-        await this.reorderSheets([defaultRow, ...restOrdered]);
+
+        musicListMap.clear();
+        for (const [id, list] of nextMap) {
+            musicListMap.set(id, list);
+        }
+
+        await storage.setSheets(newSheetBases);
+        for (const sheet of newSheetBases) {
+            const list = musicListMap.get(sheet.id);
+            if (list) {
+                await storage.setMusicList(sheet.id, list.musicList);
+            }
+            ee.emit("UpdateMusicList", {
+                sheetId: sheet.id,
+                updateType: "length",
+            });
+        }
+
+        getDefaultStore().set(musicSheetsBaseAtom, newSheetBases);
     }
 
 
