@@ -165,7 +165,12 @@ class AppConfig implements IAppConfig {
             configStore.set("$schema", "2");
         }
 
-
+        if (schemaVersion < 3) {
+            if (this.getConfig("basic.downloadDestination") === undefined) {
+                this.setConfig("basic.downloadDestination", "local");
+            }
+            configStore.set("$schema", "3");
+        }
     }
 
     async setup(): Promise<void> {

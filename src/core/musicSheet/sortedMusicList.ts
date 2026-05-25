@@ -142,6 +142,35 @@ export default class SortedMusicList {
         this.removeFromCountMap(musicItems);
     }
 
+    /** Replace every row matching `oldItem` (same platform + id). */
+    replaceAllMatching(
+        oldItem: IMusic.IMusicItem,
+        newItem: IMusic.IMusicItem,
+    ): number {
+        const removed: IMusic.IMusicItem[] = [];
+        const added: IMusic.IMusicItem[] = [];
+        this.array = this.array.map(row => {
+            if (!isSameMediaItem(oldItem, row)) {
+                return row;
+            }
+            removed.push(row);
+            const next = {
+                ...newItem,
+                $timestamp: row.$timestamp,
+                $sortIndex: row.$sortIndex,
+                artwork: newItem.artwork || row.artwork,
+            };
+            added.push(next);
+            return next;
+        });
+        if (!removed.length) {
+            return 0;
+        }
+        this.removeFromCountMap(removed);
+        this.addToCountMap(added);
+        return removed.length;
+    }
+
     removeByIndex(indices: number[]) {
         const indicesSet = new Set(indices);
         const removedItems: IMusic.IMusicItem[] = [];

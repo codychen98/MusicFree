@@ -90,6 +90,8 @@ export interface ILanguageData {
     "toast.commmentNotAvaliableForCurrentMusic": string; // 当前音乐无法进行评论
     "toast.addToNextPlay": string; // 添加到下一曲
     "toast.beginDownload": string; // 开始下载
+    "toast.download.webdavAudioSkipped": string; // WebDAV 已有文件跳过上传
+    "toast.download.webdavUploadFallback": string; // WebDAV 上传失败回退本地
     "toast.rememberToSave": string; // 请记得保存
 
     // 本地音乐相关
@@ -329,6 +331,13 @@ export interface ILanguageData {
     "basicSettings.playQualityOrder.desc": string; // 播放更低音质
     
     "basicSettings.download": string; // 下载
+    "basicSettings.downloadDestination": string; // 下载位置
+    "basicSettings.downloadDestination.local": string; // 本地文件夹
+    "basicSettings.downloadDestination.webdav": string; // WebDAV 插件文件夹
+    "basicSettings.downloadDestination.webdavFolder": string; // WebDAV 歌曲路径
+    "basicSettings.downloadDestination.webdavUnavailable": string; // WebDAV 未配置提示
+    "basicSettings.downloadDestination.webdavPathUnset": string; // 未设置歌曲路径
+    "basicSettings.downloadDestination.webdavPluginListHint": string; // WebDAV 插件列表缓存提示
     "basicSettings.downloadPath": string; // 下载路径
     "basicSettings.fileSelector.selectFolder": string; // 选择文件夹
     "basicSettings.maxDownload": string; // 最大同时下载数目

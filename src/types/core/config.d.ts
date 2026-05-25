@@ -2,7 +2,7 @@ import type { ResumeMode, SortType } from "@/constants/commonConst.ts";
 import type { CustomizedColors } from "@/hooks/useColors";
 
 export interface IAppConfigProperties {
-    $schema: "2";
+    $schema: "3";
     // Basic
     "basic.autoPlayWhenAppStart": boolean;
     "basic.useCelluarNetworkPlay": boolean;
@@ -11,6 +11,8 @@ export interface IAppConfigProperties {
     "basic.clickMusicInSearch": "playMusic" | "playMusicAndReplace";
     "basic.clickMusicInAlbum": "playAlbum" | "playMusic";
     "basic.downloadPath": string;
+    /** Where completed downloads are stored; `webdav` uses WebDAV plugin folder (Phase 2). */
+    "basic.downloadDestination": "local" | "webdav";
     "basic.notInterrupt": boolean;
     "basic.tempRemoteDuck": "pause" | "lowerVolume";
     "basic.tempRemoteDuckVolume": 0.3 | 0.5 | 0.8;

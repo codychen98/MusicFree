@@ -15,8 +15,16 @@ import { nanoid } from "nanoid";
 import path from "path-browserify";
 import { useEffect, useState } from "react";
 import { copyFile, downloadFile, exists, unlink, writeFile } from "react-native-fs";
+import { migrateTrackToWebdavSource } from "./migrateTrackToWebdavSource";
 import LocalMusicSheet from "./localMusicSheet";
+import { isWebdavDownloadTargetAvailable } from "./webdav-download/config";
+import { uploadDownloadArtifacts } from "./webdav-download/upload";
 import { IPluginManager } from "@/types/core/pluginManager";
+
+interface SidecarLyricPaths {
+    lrcPath?: string;
+    tranLrcPath?: string;
+}
 
 
 export enum DownloadStatus {
@@ -45,6 +53,12 @@ export enum DownloaderEvent {
 
     // 下载完成
     DownloadQueueCompleted = "download-queue-completed",
+
+    /** WebDAV 6B: remote audio already exists; upload skipped */
+    WebdavAudioSkipped = "webdav-audio-skipped",
+
+    /** WebDAV upload failed; file saved locally instead */
+    WebdavUploadFallback = "webdav-upload-fallback",
 }
 
 export enum DownloadFailReason {
@@ -92,6 +106,10 @@ interface IEvents {
     [DownloaderEvent.DownloadTaskUpdate]: (task: IDownloadTaskInfo) => void;
     /** 下载队列清空 */
     [DownloaderEvent.DownloadQueueCompleted]: () => void;
+    /** WebDAV 目标：远端已有同名音频，跳过上传 */
+    [DownloaderEvent.WebdavAudioSkipped]: (mediaItem: IMusic.IMusicItem) => void;
+    /** WebDAV 上传失败，已回退到本地文件夹 */
+    [DownloaderEvent.WebdavUploadFallback]: (mediaItem: IMusic.IMusicItem) => void;
 }
 
 class Downloader extends EventEmitter<IEvents> implements IInjectable {
@@ -111,32 +129,34 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
     private async writeSidecarLyrics(
         musicItem: IMusic.IMusicItem,
         audioPath: string,
-    ): Promise<void> {
+    ): Promise<SidecarLyricPaths> {
         try {
             const plugin = this.pluginManagerService.getByMedia(musicItem);
             const lrcSource = await plugin?.methods
                 ?.getLyric(musicItem)
                 ?.catch(() => null);
             if (!lrcSource) {
-                return;
+                return {};
             }
 
             const lastDot = audioPath.lastIndexOf(".");
             if (lastDot === -1) {
-                return;
+                return {};
             }
             const basePath = audioPath.slice(0, lastDot);
+            const paths: SidecarLyricPaths = {};
 
             if (lrcSource.rawLrc) {
-                await writeFile(`${basePath}.lrc`, lrcSource.rawLrc, "utf8");
+                const lrcPath = `${basePath}.lrc`;
+                await writeFile(lrcPath, lrcSource.rawLrc, "utf8");
+                paths.lrcPath = lrcPath;
             }
             if (lrcSource.translation) {
-                await writeFile(
-                    `${basePath}.tran.lrc`,
-                    lrcSource.translation,
-                    "utf8",
-                );
+                const tranPath = `${basePath}.tran.lrc`;
+                await writeFile(tranPath, lrcSource.translation, "utf8");
+                paths.tranLrcPath = tranPath;
             }
+            return paths;
         } catch (e: unknown) {
             errorLog("下载-写入歌词失败", {
                 item: {
@@ -146,7 +166,77 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
                 },
                 reason: e instanceof Error ? e.message : e,
             });
+            return {};
         }
+    }
+
+    private shouldUseWebdavDownloadDestination(): boolean {
+        const destination =
+            this.configService.getConfig("basic.downloadDestination") ?? "local";
+        return destination === "webdav" && isWebdavDownloadTargetAvailable();
+    }
+
+    private async ensureLocalDownloadFolder(targetDownloadPath: string): Promise<boolean> {
+        try {
+            const folder = path.dirname(targetDownloadPath);
+            const folderExists = await exists(folder);
+            if (!folderExists) {
+                await mkdirR(folder);
+            }
+            return true;
+        } catch (e: unknown) {
+            return false;
+        }
+    }
+
+    private async finalizeLocalDownload(
+        cacheDownloadPath: string,
+        targetDownloadPath: string,
+        musicItem: IMusic.IMusicItem,
+    ): Promise<void> {
+        await copyFile(cacheDownloadPath, targetDownloadPath);
+        await this.writeSidecarLyrics(musicItem, targetDownloadPath);
+
+        LocalMusicSheet.addMusic({
+            ...musicItem,
+            [internalSerializeKey]: {
+                localPath: targetDownloadPath,
+            },
+        });
+
+        patchMediaExtra(musicItem, {
+            downloaded: true,
+            localPath: targetDownloadPath,
+        });
+    }
+
+    private async completeWebdavDownload(
+        cacheDownloadPath: string,
+        musicItem: IMusic.IMusicItem,
+        audioFilename: string,
+    ): Promise<{ audioSkipped: boolean }> {
+        const sidecars = await this.writeSidecarLyrics(musicItem, cacheDownloadPath);
+        const uploadResult = await uploadDownloadArtifacts({
+            localAudioPath: cacheDownloadPath,
+            audioFilename,
+            localLrcPath: sidecars.lrcPath ?? null,
+            localTranLrcPath: sidecars.tranLrcPath ?? null,
+        });
+
+        await migrateTrackToWebdavSource(musicItem, {
+            remotePath: uploadResult.remoteAudioPath,
+            title: musicItem.title,
+            artist: musicItem.artist,
+            album: musicItem.album,
+            duration: musicItem.duration,
+        });
+
+        patchMediaExtra(musicItem, {
+            downloaded: true,
+            localPath: undefined,
+        });
+
+        return { audioSkipped: uploadResult.audioSkipped };
     }
 
     injectDependencies(configService: IAppConfig, pluginManager: IPluginManager): void {
@@ -318,27 +408,31 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
             extension = "mp3";
         }
 
+        const audioFilename = `${nextTask.filename}.${extension}`;
+
         // 缓存下载地址
         const cacheDownloadPath = addFileScheme(
             this.getCacheDownloadPath(`${nanoid()}.${extension}`),
         );
 
-        // 真实下载地址
-        const targetDownloadPath = addFileScheme(
-            this.getDownloadPath(`${nextTask.filename}.${extension}`),
-        );
+        const useWebdavDestination = this.shouldUseWebdavDownloadDestination();
 
-        // 检测下载位置是否存在
-        try {
-            const folder = path.dirname(targetDownloadPath);
-            const folderExists = await exists(folder);
-            if (!folderExists) {
-                await mkdirR(folder);
+        // 真实下载地址（仅本地模式需要）
+        const targetDownloadPath = useWebdavDestination
+            ? null
+            : addFileScheme(this.getDownloadPath(audioFilename));
+
+        if (targetDownloadPath) {
+            const folderReady = await this.ensureLocalDownloadFolder(targetDownloadPath);
+            if (!folderReady) {
+                this.markTaskAsError(
+                    musicItem,
+                    DownloadFailReason.NoWritePermission,
+                    new Error("mkdir failed"),
+                );
+                this.downloadNextPendingTask();
+                return;
             }
-        } catch (e: any) {
-            this.markTaskAsError(musicItem, DownloadFailReason.NoWritePermission, e);
-            this.downloadNextPendingTask();
-            return;
         }
 
         // 下载
@@ -367,21 +461,57 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
 
         try {
             await promise;
-            // 下载完成，移动文件
-            await copyFile(cacheDownloadPath, targetDownloadPath);
-            await this.writeSidecarLyrics(musicItem, targetDownloadPath);
 
-            LocalMusicSheet.addMusic({
-                ...musicItem,
-                [internalSerializeKey]: {
-                    localPath: targetDownloadPath,
-                },
-            });
-
-            patchMediaExtra(musicItem, {
-                downloaded: true,
-                localPath: targetDownloadPath,
-            });
+            if (useWebdavDestination) {
+                try {
+                    const webdavResult = await this.completeWebdavDownload(
+                        cacheDownloadPath,
+                        musicItem,
+                        audioFilename,
+                    );
+                    if (webdavResult.audioSkipped) {
+                        this.emit(
+                            DownloaderEvent.WebdavAudioSkipped,
+                            musicItem,
+                        );
+                    }
+                } catch (uploadError: unknown) {
+                    errorLog("下载-WebDAV上传失败，回退本地", {
+                        item: {
+                            id: musicItem.id,
+                            title: musicItem.title,
+                            platform: musicItem.platform,
+                        },
+                        reason:
+                            uploadError instanceof Error
+                                ? uploadError.message
+                                : uploadError,
+                    });
+                    const fallbackTarget = addFileScheme(
+                        this.getDownloadPath(audioFilename),
+                    );
+                    const folderReady =
+                        await this.ensureLocalDownloadFolder(fallbackTarget);
+                    if (!folderReady) {
+                        throw uploadError;
+                    }
+                    await this.finalizeLocalDownload(
+                        cacheDownloadPath,
+                        fallbackTarget,
+                        musicItem,
+                    );
+                    this.emit(
+                        DownloaderEvent.WebdavUploadFallback,
+                        musicItem,
+                    );
+                }
+            } else {
+                await this.finalizeLocalDownload(
+                    cacheDownloadPath,
+                    targetDownloadPath!,
+                    musicItem,
+                );
+            }
 
             this.markTaskAsCompleted(musicItem);
         } catch (e: any) {

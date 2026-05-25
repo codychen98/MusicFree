@@ -491,6 +491,35 @@ class MusicSheetClazz implements IInjectable {
     }
 
 
+    /**
+     * Replace every playlist row matching `oldItem` with `newItem` (all sheets).
+     * @returns Total rows replaced.
+     */
+    async replaceMatchingMusicEverywhere(
+        oldItem: IMusic.IMusicItem,
+        newItem: IMusic.IMusicItem,
+    ): Promise<number> {
+        const musicSheets = getDefaultStore().get(musicSheetsBaseAtom);
+        let total = 0;
+        for (const sheet of musicSheets) {
+            const musicList = this.getSortedMusicListBySheetId(sheet.id);
+            const replaced = musicList.replaceAllMatching(oldItem, newItem);
+            if (!replaced) {
+                continue;
+            }
+            total += replaced;
+            await storage.setMusicList(sheet.id, musicList.musicList);
+            ee.emit("UpdateMusicList", {
+                sheetId: sheet.id,
+                updateType: "length",
+            });
+        }
+        if (total > 0) {
+            markWebdavLocalMutation();
+        }
+        return total;
+    }
+
     async removeMusic(
         sheetId: string,
         musicItems: IMusic.IMusicItem | IMusic.IMusicItem[],

@@ -8,6 +8,10 @@ import { showPanel } from "@/components/panels/usePanel";
 import { SortType } from "@/constants/commonConst.ts";
 import pathConst from "@/constants/pathConst";
 import Config, { useAppConfig } from "@/core/appConfig";
+import {
+    getWebdavDownloadTargetSummary,
+    isWebdavDownloadTargetAvailable,
+} from "@/core/webdav-download/config";
 import { useI18N } from "@/core/i18n";
 import { ROUTE_PATH, useNavigate } from "@/core/router";
 import useColors from "@/hooks/useColors";
@@ -20,7 +24,7 @@ import rpx from "@/utils/rpx";
 import Toast from "@/utils/toast";
 import Clipboard from "@react-native-clipboard/clipboard";
 import Slider from "@react-native-community/slider";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SectionList, StyleSheet, TouchableOpacity, View } from "react-native";
 import { readdir } from "react-native-fs";
 import { FlatList, ScrollView } from "react-native-gesture-handler";
@@ -111,6 +115,7 @@ export default function BasicSetting() {
     const clickMusicInSearch = useAppConfig("basic.clickMusicInSearch");
     const clickMusicInAlbum = useAppConfig("basic.clickMusicInAlbum");
     const downloadPath = useAppConfig("basic.downloadPath");
+    const downloadDestination = useAppConfig("basic.downloadDestination");
     const notInterrupt = useAppConfig("basic.notInterrupt");
     const tempRemoteDuck = useAppConfig("basic.tempRemoteDuck");
     const tempRemoteDuckVolume = useAppConfig("basic.tempRemoteDuckVolume");
@@ -147,6 +152,114 @@ export default function BasicSetting() {
     useEffect(() => {
         refreshCacheSize();
     }, []);
+
+    const downloadLocationOptions = useMemo(() => {
+        const destination = downloadDestination ?? "local";
+        const destinationRow = {
+            title: t("basicSettings.downloadDestination"),
+            right: (
+                <ThemeText style={styles.centerText}>
+                    {destination === "webdav"
+                        ? t("basicSettings.downloadDestination.webdav")
+                        : t("basicSettings.downloadDestination.local")}
+                </ThemeText>
+            ),
+            onPress() {
+                showDialog("RadioDialog", {
+                    title: t("basicSettings.downloadDestination"),
+                    content: [
+                        {
+                            label: t("basicSettings.downloadDestination.local"),
+                            value: "local",
+                        },
+                        {
+                            label: t("basicSettings.downloadDestination.webdav"),
+                            value: "webdav",
+                        },
+                    ],
+                    onOk(val: "local" | "webdav") {
+                        if (
+                            val === "webdav" &&
+                            !isWebdavDownloadTargetAvailable()
+                        ) {
+                            Toast.warn(
+                                t(
+                                    "basicSettings.downloadDestination.webdavUnavailable",
+                                ),
+                            );
+                            return;
+                        }
+                        Config.setConfig("basic.downloadDestination", val);
+                    },
+                    defaultSelected: destination,
+                });
+            },
+        };
+
+        if (destination === "local") {
+            return [
+                destinationRow,
+                {
+                    title: t("basicSettings.downloadPath"),
+                    right: (
+                        <ThemeText
+                            fontSize="subTitle"
+                            style={styles.centerText}
+                            numberOfLines={3}>
+                            {downloadPath ?? pathConst.downloadMusicPath}
+                        </ThemeText>
+                    ),
+                    onPress() {
+                        navigate<"file-selector">(ROUTE_PATH.FILE_SELECTOR, {
+                            fileType: "folder",
+                            multi: false,
+                            actionText: t("basicSettings.fileSelector.selectFolder"),
+                            async onAction(selectedFiles) {
+                                try {
+                                    const targetDir = selectedFiles[0];
+                                    await readdir(targetDir.path);
+                                    Config.setConfig(
+                                        "basic.downloadPath",
+                                        targetDir.path,
+                                    );
+                                    return true;
+                                } catch {
+                                    Toast.warn(
+                                        t("toast.folderNotExistOrNoPermission"),
+                                    );
+                                    return false;
+                                }
+                            },
+                        });
+                    },
+                },
+            ];
+        }
+
+        const summary = getWebdavDownloadTargetSummary();
+        const pathLabel = summary.available
+            ? summary.searchPathSegment ||
+              t("basicSettings.downloadDestination.webdavPathUnset")
+            : t("basicSettings.downloadDestination.webdavUnavailable");
+
+        return [
+            destinationRow,
+            {
+                title: t("basicSettings.downloadDestination.webdavFolder"),
+                description: t(
+                    "basicSettings.downloadDestination.webdavPluginListHint",
+                ),
+                right: (
+                    <ThemeText
+                        fontSize="subTitle"
+                        style={styles.centerText}
+                        numberOfLines={3}>
+                        {pathLabel}
+                    </ThemeText>
+                ),
+            },
+        ];
+    }, [downloadDestination, downloadPath, navigate, t]);
 
     const basicOptions = [
         {
@@ -337,39 +450,7 @@ export default function BasicSetting() {
         {
             title: t("basicSettings.download"),
             data: [
-                {
-                    title: t("basicSettings.downloadPath"),
-                    right: (
-                        <ThemeText
-                            fontSize="subTitle"
-                            style={styles.centerText}
-                            numberOfLines={3}>
-                            {downloadPath ??
-                                pathConst.downloadMusicPath}
-                        </ThemeText>
-                    ),
-                    onPress() {
-                        navigate<"file-selector">(ROUTE_PATH.FILE_SELECTOR, {
-                            fileType: "folder",
-                            multi: false,
-                            actionText: t("basicSettings.fileSelector.selectFolder"),
-                            async onAction(selectedFiles) {
-                                try {
-                                    const targetDir = selectedFiles[0];
-                                    await readdir(targetDir.path);
-                                    Config.setConfig(
-                                        "basic.downloadPath",
-                                        targetDir.path,
-                                    );
-                                    return true;
-                                } catch {
-                                    Toast.warn(t("toast.folderNotExistOrNoPermission"));
-                                    return false;
-                                }
-                            },
-                        });
-                    },
-                },
+                ...downloadLocationOptions,
                 createRadio(
                     t("basicSettings.maxDownload"),
                     "basic.maxDownload",
@@ -617,7 +698,10 @@ export default function BasicSetting() {
                             withHorizontalPadding
                             heightType="small"
                             onPress={item.onPress}>
-                            <ListItem.Content title={item.title} />
+                            <ListItem.Content
+                                title={item.title}
+                                description={item.description}
+                            />
                             {Right}
                         </ListItem>
                     );

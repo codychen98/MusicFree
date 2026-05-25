@@ -314,6 +314,14 @@ function bindEvents() {
     downloader.on(DownloaderEvent.DownloadQueueCompleted, () => {
         Toast.success("下载任务已完成");
     });
+
+    downloader.on(DownloaderEvent.WebdavAudioSkipped, () => {
+        Toast.warn(i18n.t("toast.download.webdavAudioSkipped"));
+    });
+
+    downloader.on(DownloaderEvent.WebdavUploadFallback, () => {
+        Toast.warn(i18n.t("toast.download.webdavUploadFallback"));
+    });
 }
 
 export default async function () {

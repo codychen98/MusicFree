@@ -384,6 +384,39 @@ class TrackPlayer extends EventEmitter<{
         }
     }
 
+    /** Replace every queue row matching `oldItem` (same platform + id). */
+    replaceMatchingMusic(
+        oldItem: IMusic.IMusicItem,
+        newItem: IMusic.IMusicItem,
+    ): void {
+        const playList = this.playList;
+        let changed = false;
+        const newPlayList = playList.map(row => {
+            if (!isSameMediaItem(oldItem, row)) {
+                return row;
+            }
+            changed = true;
+            return {
+                ...newItem,
+                $timestamp: row.$timestamp,
+                $sortIndex: row.$sortIndex,
+                artwork: newItem.artwork || row.artwork,
+            };
+        });
+        if (!changed) {
+            return;
+        }
+        if (this.currentMusic && isSameMediaItem(oldItem, this.currentMusic)) {
+            const idx = newPlayList.findIndex(it =>
+                isSameMediaItem(it, newItem),
+            );
+            const current =
+                idx >= 0 ? newPlayList[idx] : newPlayList[this.currentIndex];
+            this.setCurrentMusic(current ?? null);
+        }
+        this.setPlayList(newPlayList);
+    }
+
     async remove(musicItem: IMusic.IMusicItem): Promise<void> {
         const playList = this.playList;
 
