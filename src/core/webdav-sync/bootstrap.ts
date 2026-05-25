@@ -6,6 +6,7 @@ import { trace } from "@/utils/log";
 import PersistStatus from "@/utils/persistStatus";
 import { AuthType, createClient } from "webdav";
 import {
+    clearWebdavPendingPushAfterManualRestore,
     isWebdavAutoSyncEnabled,
     isWebdavCredentialsComplete,
     isWebdavPendingPush,
@@ -74,11 +75,14 @@ async function autoPullFromRemote(raw: string): Promise<void> {
     await Backup.resume(raw, ResumeMode.Append, {
         fullSheetOverwrite: true,
     });
+    clearWebdavPendingPushAfterManualRestore();
 }
 
 /**
- * Cold-start sync: flush pending uploads before auto-pull (Desktop D5 / Android A3).
+ * Cold-start sync: when `MusicFreeBackup.json` exists on WebDAV, always pull with full
+ * sheet overwrite (remote is source of truth). `webdav.pendingPush` does not skip pull.
  * Empty remote + non-empty local: blocking dialog before overwrite (Desktop D6 / Android A4).
+ * No remote file: push local snapshot if pending, so first backup can be created.
  */
 export async function runWebdavBootstrapSync(): Promise<void> {
     if (!isWebdavAutoSyncEnabled() || !isWebdavCredentialsComplete()) {
@@ -88,25 +92,30 @@ export async function runWebdavBootstrapSync(): Promise<void> {
         return;
     }
 
-    if (isWebdavPendingPush()) {
-        webdavSyncLog("bootstrap: pendingPush — flush push only, skip pull");
-        const pushed = await flushWebdavUpload();
-        webdavSyncLog(`bootstrap: push ${pushed ? "succeeded" : "failed"}`);
-        return;
-    }
-
-    webdavSyncLog("bootstrap: no pendingPush — evaluate auto-pull");
+    webdavSyncLog("bootstrap: remote-wins — evaluate auto-pull");
 
     let raw: string | null;
     try {
         raw = await fetchRemoteBackupRaw();
     } catch (error: unknown) {
         webdavSyncLog("bootstrap: fetch remote failed", error);
+        if (isWebdavPendingPush()) {
+            const pushed = await flushWebdavUpload();
+            webdavSyncLog(
+                `bootstrap: fetch failed — flush pending push ${pushed ? "succeeded" : "failed"}`,
+            );
+        }
         return;
     }
 
     if (raw === null) {
         webdavSyncLog("bootstrap: no remote backup file");
+        if (isWebdavPendingPush()) {
+            const pushed = await flushWebdavUpload();
+            webdavSyncLog(
+                `bootstrap: no remote — flush pending push ${pushed ? "succeeded" : "failed"}`,
+            );
+        }
         return;
     }
 
