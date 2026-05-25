@@ -1,8 +1,10 @@
 import {
     StorageKeys,
     internalSerializeKey,
+    localPluginPlatform,
     supportLocalMediaType,
 } from "@/constants/commonConst";
+import { parseDownloadBasename } from "@/utils/downloadFilename";
 import mp3Util, { IBasicMeta } from "@/native/mp3Util";
 import { addFileScheme, getFileName } from "@/utils/fileUtils.ts";
 import {
@@ -101,20 +103,6 @@ export async function removeMusic(
     saveLocalSheet();
 }
 
-function parseFilename(fn: string): Partial<IMusic.IMusicItem> | null {
-    const data = fn.slice(0, fn.lastIndexOf(".")).split("@");
-    const [platform, id, title, artist] = data;
-    if (!platform || !id) {
-        return null;
-    }
-    return {
-        id,
-        platform: platform,
-        title: title ?? "",
-        artist: artist ?? "",
-    };
-}
-
 function localMediaFilter(filename: string) {
     return supportLocalMediaType.some(ext => filename.toLowerCase().endsWith(ext));
 }
@@ -177,13 +165,32 @@ async function importLocal(_folderPaths: string[]) {
     }
     const musicItems: IMusic.IMusicItem[] = await Promise.all(
         musicList.map(async (musicPath, index) => {
-            let { platform, id, title, artist } =
-                parseFilename(getFileName(musicPath, true)) ?? {};
+            const parsed = parseDownloadBasename(getFileName(musicPath, true));
             const meta = metas[index];
-            if (!platform || !id) {
-                platform = "本地";
+            let platform: string;
+            let id: string;
+            let title: string | undefined;
+            let artist: string | undefined;
+
+            if (
+                parsed?.format === "legacy" &&
+                parsed.platform &&
+                parsed.id
+            ) {
+                platform = parsed.platform;
+                id = parsed.id;
+                title = parsed.title;
+                artist = parsed.artist;
+            } else if (parsed) {
+                platform = localPluginPlatform;
+                id = CryptoJs.MD5(musicPath).toString(CryptoJs.enc.Hex);
+                title = parsed.title;
+                artist = parsed.artist;
+            } else {
+                platform = localPluginPlatform;
                 id = CryptoJs.MD5(musicPath).toString(CryptoJs.enc.Hex);
             }
+
             return {
                 id,
                 platform,

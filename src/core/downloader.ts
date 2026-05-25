@@ -2,7 +2,8 @@ import { internalSerializeKey, supportLocalMediaType } from "@/constants/commonC
 import pathConst from "@/constants/pathConst";
 import { IAppConfig } from "@/types/core/config";
 import { IInjectable } from "@/types/infra";
-import { addFileScheme, escapeCharacter, mkdirR } from "@/utils/fileUtils";
+import { buildDownloadBasename } from "@/utils/downloadFilename";
+import { addFileScheme, mkdirR } from "@/utils/fileUtils";
 import { errorLog } from "@/utils/log";
 import { patchMediaExtra } from "@/utils/mediaExtra";
 import { getMediaUniqueKey, isSameMediaItem } from "@/utils/mediaUtils";
@@ -13,7 +14,7 @@ import { atom, getDefaultStore, useAtomValue } from "jotai";
 import { nanoid } from "nanoid";
 import path from "path-browserify";
 import { useEffect, useState } from "react";
-import { copyFile, downloadFile, exists, unlink } from "react-native-fs";
+import { copyFile, downloadFile, exists, unlink, writeFile } from "react-native-fs";
 import LocalMusicSheet from "./localMusicSheet";
 import { IPluginManager } from "@/types/core/pluginManager";
 
@@ -100,13 +101,53 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
     private downloadingCount = 0;
 
     private static generateFilename(musicItem: IMusic.IMusicItem) {
-        return `${escapeCharacter(musicItem.platform)}@${escapeCharacter(
-            musicItem.id,
-        )}@${escapeCharacter(musicItem.title)}@${escapeCharacter(
-            musicItem.artist,
-        )}`.slice(0, 200);
+        return buildDownloadBasename(musicItem);
     }
 
+    /**
+     * Write sibling `.lrc` / `.tran.lrc` next to the downloaded audio file.
+     * Failures are logged only; they do not fail the download task.
+     */
+    private async writeSidecarLyrics(
+        musicItem: IMusic.IMusicItem,
+        audioPath: string,
+    ): Promise<void> {
+        try {
+            const plugin = this.pluginManagerService.getByMedia(musicItem);
+            const lrcSource = await plugin?.methods
+                ?.getLyric(musicItem)
+                ?.catch(() => null);
+            if (!lrcSource) {
+                return;
+            }
+
+            const lastDot = audioPath.lastIndexOf(".");
+            if (lastDot === -1) {
+                return;
+            }
+            const basePath = audioPath.slice(0, lastDot);
+
+            if (lrcSource.rawLrc) {
+                await writeFile(`${basePath}.lrc`, lrcSource.rawLrc, "utf8");
+            }
+            if (lrcSource.translation) {
+                await writeFile(
+                    `${basePath}.tran.lrc`,
+                    lrcSource.translation,
+                    "utf8",
+                );
+            }
+        } catch (e: unknown) {
+            errorLog("下载-写入歌词失败", {
+                item: {
+                    id: musicItem.id,
+                    title: musicItem.title,
+                    platform: musicItem.platform,
+                },
+                reason: e instanceof Error ? e.message : e,
+            });
+        }
+    }
 
     injectDependencies(configService: IAppConfig, pluginManager: IPluginManager): void {
         this.configService = configService;
@@ -328,6 +369,7 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
             await promise;
             // 下载完成，移动文件
             await copyFile(cacheDownloadPath, targetDownloadPath);
+            await this.writeSidecarLyrics(musicItem, targetDownloadPath);
 
             LocalMusicSheet.addMusic({
                 ...musicItem,
