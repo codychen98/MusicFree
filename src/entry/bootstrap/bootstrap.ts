@@ -16,6 +16,10 @@ import MusicSheet from "@/core/musicSheet";
 import PluginManager from "@/core/pluginManager";
 import Theme from "@/core/theme";
 import TrackPlayer from "@/core/trackPlayer";
+import {
+    onWebdavAfterPlaylistRemove,
+    WebdavAfterPlaylistRemoveEvent,
+} from "@/core/webdav-download/afterPlaylistRemove";
 import NativeUtils from "@/native/utils";
 import { checkAndCreateDir } from "@/utils/fileUtils";
 import { errorLog, trace } from "@/utils/log";
@@ -322,6 +326,33 @@ function bindEvents() {
     downloader.on(DownloaderEvent.WebdavUploadFallback, () => {
         Toast.warn(i18n.t("toast.download.webdavUploadFallback"));
     });
+
+    onWebdavAfterPlaylistRemove(
+        WebdavAfterPlaylistRemoveEvent.RemoteDeleteSkipped,
+        ({ title, playlistTitles }) => {
+            const playlistSeparator = i18n.language.startsWith("en")
+                ? ", "
+                : "、";
+            Toast.warn(
+                i18n.t("toast.webdav.remoteDeleteSkipped", {
+                    title,
+                    playlists: playlistTitles.join(playlistSeparator),
+                }),
+            );
+        },
+    );
+
+    onWebdavAfterPlaylistRemove(
+        WebdavAfterPlaylistRemoveEvent.RemoteDeleteFailed,
+        ({ title, reason }) => {
+            Toast.warn(
+                i18n.t("toast.webdav.remoteDeleteFailed", {
+                    title,
+                    reason,
+                }),
+            );
+        },
+    );
 }
 
 export default async function () {

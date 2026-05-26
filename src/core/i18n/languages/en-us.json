@@ -72,6 +72,8 @@
     "toast.beginDownload": "Download started, please don't close the app until all downloads complete",
     "toast.download.webdavAudioSkipped": "Track already on WebDAV; upload skipped. Missing lyrics may still be uploaded.",
     "toast.download.webdavUploadFallback": "WebDAV upload failed; saved to the local music folder instead",
+    "toast.webdav.remoteDeleteSkipped": "\"{title}\" removed from this list; WebDAV file kept because the track is still in: {playlists}",
+    "toast.webdav.remoteDeleteFailed": "\"{title}\" removed from the list, but WebDAV delete failed: {reason}",
     "toast.rememberToSave": "Remember to save~",
     "localMusic.scanLocalMusic": "Scan Local Music",
     "localMusic.beginScan": "Start Scan",

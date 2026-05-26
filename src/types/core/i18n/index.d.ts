@@ -92,6 +92,8 @@ export interface ILanguageData {
     "toast.beginDownload": string; // 开始下载
     "toast.download.webdavAudioSkipped": string; // WebDAV 已有文件跳过上传
     "toast.download.webdavUploadFallback": string; // WebDAV 上传失败回退本地
+    "toast.webdav.remoteDeleteSkipped": string; // WebDAV 远程删除因仍存在于其他歌单而跳过
+    "toast.webdav.remoteDeleteFailed": string; // WebDAV 远程删除失败
     "toast.rememberToSave": string; // 请记得保存
 
     // 本地音乐相关

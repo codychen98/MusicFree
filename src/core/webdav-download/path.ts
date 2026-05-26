@@ -43,3 +43,25 @@ export function translationSidecarFilename(audioFilename: string): string {
         lastDot === -1 ? audioFilename : audioFilename.slice(0, lastDot);
     return `${base}.tran.lrc`;
 }
+
+export function remotePathsForWebdavTrack(remoteAudioPath: string): {
+    audioPath: string;
+    lrcPath: string;
+    tranLrcPath: string;
+} {
+    const normalized = remoteAudioPath.replace(/\\/g, "/");
+    const lastSlash = normalized.lastIndexOf("/");
+    const remoteDir =
+        lastSlash === -1 ? "" : normalized.slice(0, lastSlash);
+    const audioFilename =
+        lastSlash === -1 ? normalized : normalized.slice(lastSlash + 1);
+
+    return {
+        audioPath: normalized,
+        lrcPath: remotePathFor(remoteDir, lyricSidecarFilename(audioFilename)),
+        tranLrcPath: remotePathFor(
+            remoteDir,
+            translationSidecarFilename(audioFilename),
+        ),
+    };
+}

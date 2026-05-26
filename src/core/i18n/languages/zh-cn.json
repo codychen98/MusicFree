@@ -72,6 +72,8 @@
     "toast.beginDownload": "开始下载，全部下载完成之前请不要关闭应用",
     "toast.download.webdavAudioSkipped": "WebDAV 上已有该歌曲，已跳过上传；若缺少歌词仍会补传",
     "toast.download.webdavUploadFallback": "WebDAV 上传失败，已保存到本地音乐文件夹",
+    "toast.webdav.remoteDeleteSkipped": "「{title}」已从当前列表移除；WebDAV 文件仍保留，歌曲还在：{playlists}",
+    "toast.webdav.remoteDeleteFailed": "「{title}」已从列表移除，但 WebDAV 文件删除失败：{reason}",
     "toast.rememberToSave": "记得保存哦~",
     "localMusic.scanLocalMusic": "扫描本地音乐",
     "localMusic.beginScan": "开始扫描",

@@ -12,32 +12,62 @@ import { nanoid } from "nanoid";
 import { useEffect, useMemo, useState } from "react";
 import migrate, { migrateV2 } from "./migrate.ts";
 import SortedMusicList from "./sortedMusicList.ts";
-import { markWebdavLocalMutation } from "@/core/webdav-sync/bridge";
+import { handleWebdavAfterPlaylistRemove } from "@/core/webdav-download/afterPlaylistRemove";
 import { WEBDAV_MUSIC_PLUGIN_PLATFORM } from "@/core/webdav-download/config";
+import { markWebdavLocalMutation } from "@/core/webdav-sync/bridge";
 import storage from "./storage.ts";
 
-/** When applying remote backup, keep one row per title+artist (WebDAV wins over stream ids). */
+function remoteRestoreItemRank(item: IMusic.IMusicItem): number {
+    if (item.platform === WEBDAV_MUSIC_PLUGIN_PLATFORM) {
+        return 3;
+    }
+    if (item.platform === localPluginPlatform) {
+        return 1;
+    }
+    return 2;
+}
+
+/**
+ * When applying remote backup:
+ * 1) Drop exact duplicate rows (same platform + id).
+ * 2) For same title+artist with different identities (e.g. bimiao + WebDAV), keep one — WebDAV wins.
+ */
 function dedupeMusicListForRemoteRestore(
     items: IMusic.IMusicItem[],
 ): IMusic.IMusicItem[] {
-    const byKey = new Map<string, IMusic.IMusicItem>();
-    const rank = (item: IMusic.IMusicItem): number => {
-        if (item.platform === WEBDAV_MUSIC_PLUGIN_PLATFORM) {
-            return 3;
-        }
-        if (item.platform === localPluginPlatform) {
-            return 1;
-        }
-        return 2;
-    };
+    const byMedia = new Map<string, IMusic.IMusicItem>();
     for (const item of items) {
-        const key = `${item.title}\u0000${item.artist}`;
-        const prev = byKey.get(key);
-        if (!prev || rank(item) > rank(prev)) {
-            byKey.set(key, item);
+        const mediaKey = `${item.platform}\u0000${item.id}`;
+        byMedia.set(mediaKey, item);
+    }
+
+    const byTitleArtist = new Map<string, IMusic.IMusicItem[]>();
+    for (const item of byMedia.values()) {
+        const taKey = `${item.title}\u0000${item.artist}`;
+        const group = byTitleArtist.get(taKey);
+        if (group) {
+            group.push(item);
+        } else {
+            byTitleArtist.set(taKey, [item]);
         }
     }
-    return [...byKey.values()];
+
+    const result: IMusic.IMusicItem[] = [];
+    for (const group of byTitleArtist.values()) {
+        if (group.length === 1) {
+            result.push(group[0]!);
+            continue;
+        }
+        let best = group[0]!;
+        for (let i = 1; i < group.length; i++) {
+            const candidate = group[i]!;
+            if (remoteRestoreItemRank(candidate) > remoteRestoreItemRank(best)) {
+                best = candidate;
+            }
+        }
+        result.push(best);
+    }
+    return result;
 }
 
 const produce = new Immer({
@@ -79,6 +109,35 @@ class MusicSheetClazz implements IInjectable {
         this.appConfig = appConfigService;
     }
 
+    /** Playlists that still contain this track (by platform + id). */
+    findSheetsContainingMusic(musicItem: IMusic.IMusicItem): Array<{
+        id: string;
+        title: string;
+    }> {
+        const musicSheets = getDefaultStore().get(musicSheetsBaseAtom);
+        const matches: Array<{ id: string; title: string }> = [];
+
+        for (const sheet of musicSheets) {
+            const musicList = this.getSortedMusicListBySheetId(sheet.id);
+            if (!musicList.has(musicItem)) {
+                continue;
+            }
+            matches.push({
+                id: sheet.id,
+                title: sheet.title?.trim() || _defaultSheet.title,
+            });
+        }
+
+        return matches;
+    }
+
+    private async notifyWebdavAfterPlaylistRemove(
+        removedItems: IMusic.IMusicItem[],
+    ): Promise<void> {
+        await handleWebdavAfterPlaylistRemove(removedItems, item =>
+            this.findSheetsContainingMusic(item),
+        );
+    }
 
     async setup() {
         // 升级逻辑 - 从 AsyncStorage 升级到 MMKV
@@ -524,6 +583,9 @@ class MusicSheetClazz implements IInjectable {
         }
 
         const musicList = this.getSortedMusicListBySheetId(sheetId);
+        const removedItems = indices
+            .map(index => musicList.musicList[index])
+            .filter((item): item is IMusic.IMusicItem => item != null);
 
         musicList.removeByIndex(indices);
 
@@ -554,6 +616,7 @@ class MusicSheetClazz implements IInjectable {
             updateType: "length",
         });
         markWebdavLocalMutation();
+        await this.notifyWebdavAfterPlaylistRemove(removedItems);
     }
 
 
@@ -619,6 +682,7 @@ class MusicSheetClazz implements IInjectable {
             updateType: "length",
         });
         markWebdavLocalMutation();
+        await this.notifyWebdavAfterPlaylistRemove(musicItems);
     }
 
 
