@@ -737,7 +737,6 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
                         downloaded: true,
                         localPath: undefined,
                     });
-                    this.emit(DownloaderEvent.WebdavAudioSkipped, musicItem);
                     continue;
                 }
 
