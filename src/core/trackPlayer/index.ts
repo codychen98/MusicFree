@@ -11,6 +11,13 @@ import delay from "@/utils/delay";
 import getUrlExt from "@/utils/getUrlExt";
 import { errorLog, trace } from "@/utils/log";
 import { logQueueSnapshot } from "@/utils/trackPlayerDebug";
+import {
+    isNearEndOfTrack,
+    playbackWatchdogTiming,
+    shouldSkipPlaybackEndedFallback,
+    shouldTriggerEofWatchdog,
+    shouldTriggerSentinelStuckWatchdog,
+} from "@/core/trackPlayer/playbackWatchdog";
 import { createMediaIndexMap } from "@/utils/mediaIndexMap";
 import {
     getLocalPath,
@@ -71,6 +78,11 @@ class TrackPlayer extends EventEmitter<{
     private serviceInited = false;
     /** Prevents double auto-advance when sentinel + queue-ended/state-ended fire together. */
     private isAdvancingQueue = false;
+    private playbackWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+    private nearEndSince: number | null = null;
+    private positionStallSince: number | null = null;
+    private lastWatchdogPosition: number | null = null;
+    private sentinelStuckSince: number | null = null;
     // 播放队列索引map
     private playListIndexMap = createMediaIndexMap([] as IMusic.IMusicItem[]);
 
@@ -283,6 +295,7 @@ class TrackPlayer extends EventEmitter<{
                 },
             );
 
+            this.startPlaybackWatchdog();
             this.serviceInited = true;
         }
     }
@@ -1080,13 +1093,21 @@ class TrackPlayer extends EventEmitter<{
             return;
         }
 
-        const fromSentinel = reason === "sentinel";
         const activeTrack = await ReactNativeTrackPlayer.getActiveTrack();
-        const activeUrl = activeTrack?.url;
+        const activeIndex =
+            await ReactNativeTrackPlayer.getActiveTrackIndex();
+        const playbackState = (
+            await ReactNativeTrackPlayer.getPlaybackState()
+        ).state;
         if (
-            !fromSentinel &&
-            (TrackPlayer.isSentinelUrl(activeUrl) ||
-                activeUrl === TrackPlayer.proposedAudioUrl)
+            shouldSkipPlaybackEndedFallback({
+                reason,
+                activeUrl: activeTrack?.url,
+                activeIndex,
+                state: playbackState,
+                proposedAudioUrl: TrackPlayer.proposedAudioUrl,
+                isSentinelUrl: TrackPlayer.isSentinelUrl,
+            })
         ) {
             return;
         }
@@ -1094,6 +1115,8 @@ class TrackPlayer extends EventEmitter<{
         if (this.isPlayListEmpty() || !this.currentMusic) {
             return;
         }
+
+        const fromSentinel = reason === "sentinel";
 
         await logQueueSnapshot("handlePlaybackEnded", { reason });
         if (fromSentinel) {
@@ -1119,6 +1142,117 @@ class TrackPlayer extends EventEmitter<{
             }
         } finally {
             this.isAdvancingQueue = false;
+        }
+    }
+
+    private startPlaybackWatchdog(): void {
+        if (this.playbackWatchdogTimer) {
+            return;
+        }
+        this.playbackWatchdogTimer = setInterval(() => {
+            void this.runPlaybackWatchdog();
+        }, playbackWatchdogTiming.intervalMs);
+    }
+
+    private resetWatchdogTimingState(): void {
+        this.nearEndSince = null;
+        this.positionStallSince = null;
+        this.lastWatchdogPosition = null;
+        this.sentinelStuckSince = null;
+    }
+
+    private async runPlaybackWatchdog(): Promise<void> {
+        if (this.isAdvancingQueue || this.isPlayListEmpty()) {
+            this.resetWatchdogTimingState();
+            return;
+        }
+
+        try {
+            const now = Date.now();
+            const [activeIndex, playbackState, progress, activeTrack] =
+                await Promise.all([
+                    ReactNativeTrackPlayer.getActiveTrackIndex(),
+                    ReactNativeTrackPlayer.getPlaybackState(),
+                    ReactNativeTrackPlayer.getProgress(),
+                    ReactNativeTrackPlayer.getActiveTrack(),
+                ]);
+            const state = playbackState.state;
+            const { position, duration } = progress;
+            const activeUrl = activeTrack?.url;
+
+            if (
+                activeIndex === 1 &&
+                TrackPlayer.isSentinelUrl(activeUrl) &&
+                (state === State.Loading || state === State.Buffering)
+            ) {
+                if (this.sentinelStuckSince === null) {
+                    this.sentinelStuckSince = now;
+                }
+            } else {
+                this.sentinelStuckSince = null;
+            }
+
+            if (isNearEndOfTrack(position, duration)) {
+                if (this.nearEndSince === null) {
+                    this.nearEndSince = now;
+                }
+                if (
+                    this.lastWatchdogPosition !== null &&
+                    Math.abs(position - this.lastWatchdogPosition) < 0.05
+                ) {
+                    if (this.positionStallSince === null) {
+                        this.positionStallSince = now;
+                    }
+                } else {
+                    this.positionStallSince = null;
+                }
+            } else {
+                this.nearEndSince = null;
+                this.positionStallSince = null;
+            }
+            this.lastWatchdogPosition = position;
+
+            const playListLength = this.playList.length;
+            let watchdogReason: string | null = null;
+
+            if (
+                shouldTriggerSentinelStuckWatchdog({
+                    activeIndex,
+                    activeUrl,
+                    state,
+                    isSentinelUrl: TrackPlayer.isSentinelUrl,
+                    stuckSince: this.sentinelStuckSince,
+                    now,
+                })
+            ) {
+                watchdogReason = "watchdog:sentinelStuck";
+            } else if (
+                shouldTriggerEofWatchdog({
+                    activeIndex,
+                    state,
+                    position,
+                    duration,
+                    playListLength,
+                    nearEndSince: this.nearEndSince,
+                    positionStallSince: this.positionStallSince,
+                    now,
+                })
+            ) {
+                watchdogReason = "watchdog:eofStuck";
+            }
+
+            if (watchdogReason) {
+                await logQueueSnapshot(watchdogReason, {
+                    position,
+                    duration,
+                    state,
+                    activeIndex,
+                    activeUrl,
+                });
+                await this.handlePlaybackEnded(watchdogReason);
+            }
+        } catch {
+            // Ignore transient RNTP read failures during watchdog tick.
         }
     }
 
