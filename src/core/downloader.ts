@@ -18,7 +18,12 @@ import { copyFile, downloadFile, exists, unlink, writeFile } from "react-native-
 import { migrateTrackToWebdavSource } from "./migrateTrackToWebdavSource";
 import LocalMusicSheet from "./localMusicSheet";
 import { isWebdavDownloadTargetAvailable } from "./webdav-download/config";
-import { uploadDownloadArtifacts } from "./webdav-download/upload";
+import {
+    getWebdavMusicPluginConfig,
+    remoteAudioExists,
+    remotePathFor,
+    uploadDownloadArtifacts,
+} from "./webdav-download/upload";
 import { IPluginManager } from "@/types/core/pluginManager";
 
 interface SidecarLyricPaths {
@@ -421,6 +426,56 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
         const targetDownloadPath = useWebdavDestination
             ? null
             : addFileScheme(this.getDownloadPath(audioFilename));
+
+        if (useWebdavDestination) {
+            try {
+                const webdavConfig = getWebdavMusicPluginConfig();
+                const remoteAudioPath = remotePathFor(
+                    webdavConfig.remoteDir,
+                    audioFilename,
+                );
+                const hasRemoteAudio = await remoteAudioExists(remoteAudioPath);
+                if (hasRemoteAudio) {
+                    await migrateTrackToWebdavSource(musicItem, {
+                        remotePath: remoteAudioPath,
+                        title: musicItem.title,
+                        artist: musicItem.artist,
+                        album: musicItem.album,
+                        duration: musicItem.duration,
+                    });
+                    patchMediaExtra(musicItem, {
+                        downloaded: true,
+                        localPath: undefined,
+                    });
+                    this.emit(DownloaderEvent.WebdavAudioSkipped, musicItem);
+                    this.markTaskAsCompleted(musicItem);
+                    this.downloadNextPendingTask();
+
+                    const key = getMediaUniqueKey(musicItem);
+                    if (downloadTasks.get(key)?.status === DownloadStatus.Completed) {
+                        downloadTasks.delete(key);
+                        const downloadQueue = getDefaultStore().get(
+                            downloadQueueAtom,
+                        );
+                        const newDownloadQueue = downloadQueue.filter(
+                            item => !isSameMediaItem(item, musicItem),
+                        );
+                        getDefaultStore().set(downloadQueueAtom, newDownloadQueue);
+                    }
+                    return;
+                }
+            } catch (e: unknown) {
+                // Pre-check failure should not block download; fallback to normal flow.
+                errorLog("下载-WebDAV远端存在性预检查失败", {
+                    item: {
+                        id: musicItem.id,
+                        title: musicItem.title,
+                        platform: musicItem.platform,
+                    },
+                    reason: e instanceof Error ? e.message : e,
+                });
+            }
+        }
 
         if (targetDownloadPath) {
             const folderReady = await this.ensureLocalDownloadFolder(targetDownloadPath);
