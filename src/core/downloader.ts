@@ -95,6 +95,13 @@ interface IDownloadTaskInfo {
     musicItem: IMusic.IMusicItem;
     // 如果下载失败，下载失败的原因
     errorReason?: DownloadFailReason;
+
+    /** Optional preflight result (WebDAV destination only). */
+    preparedSource?: {
+        url: string;
+        headers?: Record<string, string>;
+        extension: string;
+    };
 }
 
 
@@ -348,13 +355,13 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
         // 更新下载状态
         this.markTaskAsStarted(musicItem);
 
-        let url = musicItem.url;
-        let headers = musicItem.headers;
+        let url = nextTask.preparedSource?.url ?? musicItem.url;
+        let headers = nextTask.preparedSource?.headers ?? musicItem.headers;
 
         const plugin = this.pluginManagerService.getByName(musicItem.platform);
 
         try {
-            if (plugin) {
+            if (!nextTask.preparedSource && plugin) {
                 const qualityOrder = getQualityOrder(
                     nextTask.quality ??
                     this.configService.getConfig("basic.defaultDownloadQuality") ??
@@ -408,7 +415,8 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
 
         // 下载逻辑
         // 识别文件后缀
-        let extension = this.getExtensionName(url);
+        let extension =
+            nextTask.preparedSource?.extension ?? this.getExtensionName(url);
         if (supportLocalMediaType.every(item => item !== ("." + extension))) {
             extension = "mp3";
         }
@@ -605,6 +613,12 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
             musicItems = [musicItems];
         }
 
+        // WebDAV destination: preflight first, then only queue missing items.
+        if (this.shouldUseWebdavDownloadDestination()) {
+            void this.preflightWebdavAndEnqueue(musicItems, quality);
+            return;
+        }
+
         // 防止重复下载
         musicItems = musicItems.filter(m => {
             const key = getMediaUniqueKey(m);
@@ -636,6 +650,135 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
         const downloadQueue = getDefaultStore().get(downloadQueueAtom);
         const newDownloadQueue = [...downloadQueue, ...musicItems];
         getDefaultStore().set(downloadQueueAtom, newDownloadQueue);
+
+        this.downloadNextPendingTask();
+    }
+
+    private async preflightWebdavAndEnqueue(
+        musicItems: IMusic.IMusicItem[],
+        quality?: IMusic.IQualityKey,
+    ): Promise<void> {
+        let webdavConfig: ReturnType<typeof getWebdavMusicPluginConfig>;
+        try {
+            webdavConfig = getWebdavMusicPluginConfig();
+        } catch {
+            // If config is incomplete, fall back to normal queue behavior.
+            this.download(musicItems, quality);
+            return;
+        }
+
+        const candidates = musicItems.filter((m) => {
+            const key = getMediaUniqueKey(m);
+            if (downloadTasks.has(key)) {
+                return false;
+            }
+            if (LocalMusicSheet.isLocalMusic(m)) {
+                return false;
+            }
+            return true;
+        });
+
+        for (const musicItem of candidates) {
+            try {
+                const plugin = this.pluginManagerService.getByName(musicItem.platform);
+                let url = musicItem.url;
+                let headers = musicItem.headers;
+
+                if (plugin) {
+                    const qualityOrder = getQualityOrder(
+                        quality ??
+                        this.configService.getConfig("basic.defaultDownloadQuality") ??
+                        "standard",
+                        this.configService.getConfig("basic.downloadQualityOrder") ?? "asc",
+                    );
+                    let data: IPlugin.IMediaSourceResult | null = null;
+                    for (let q of qualityOrder) {
+                        try {
+                            data = await plugin.methods.getMediaSource(
+                                musicItem,
+                                q,
+                                1,
+                                true,
+                            );
+                            if (!data?.url) {
+                                continue;
+                            }
+                            break;
+                        } catch { }
+                    }
+                    url = data?.url ?? url;
+                    headers = data?.headers;
+                }
+
+                if (!url) {
+                    continue;
+                }
+
+                let extension = this.getExtensionName(url);
+                if (supportLocalMediaType.every(item => item !== ("." + extension))) {
+                    extension = "mp3";
+                }
+
+                const audioFilename = `${Downloader.generateFilename(musicItem)}.${extension}`;
+                const remoteAudioPath = remotePathFor(
+                    webdavConfig.remoteDir,
+                    audioFilename,
+                );
+                const hasRemoteAudio = await remoteAudioExists(remoteAudioPath);
+                if (hasRemoteAudio) {
+                    await migrateTrackToWebdavSource(musicItem, {
+                        remotePath: remoteAudioPath,
+                        title: musicItem.title,
+                        artist: musicItem.artist,
+                        album: musicItem.album,
+                        duration: musicItem.duration,
+                    });
+                    patchMediaExtra(musicItem, {
+                        downloaded: true,
+                        localPath: undefined,
+                    });
+                    this.emit(DownloaderEvent.WebdavAudioSkipped, musicItem);
+                    continue;
+                }
+
+                const key = getMediaUniqueKey(musicItem);
+                downloadTasks.set(key, {
+                    status: DownloadStatus.Pending,
+                    filename: Downloader.generateFilename(musicItem),
+                    quality: quality,
+                    musicItem,
+                    preparedSource: {
+                        url,
+                        headers,
+                        extension,
+                    },
+                });
+
+                const downloadQueue = getDefaultStore().get(downloadQueueAtom);
+                getDefaultStore().set(downloadQueueAtom, [...downloadQueue, musicItem]);
+            } catch (e: unknown) {
+                errorLog("下载-WebDAV预检查失败（将继续下载）", {
+                    item: {
+                        id: musicItem.id,
+                        title: musicItem.title,
+                        platform: musicItem.platform,
+                    },
+                    reason: e instanceof Error ? e.message : e,
+                });
+
+                const key = getMediaUniqueKey(musicItem);
+                if (!downloadTasks.has(key)) {
+                    downloadTasks.set(key, {
+                        status: DownloadStatus.Pending,
+                        filename: Downloader.generateFilename(musicItem),
+                        quality: quality,
+                        musicItem,
+                    });
+                    const downloadQueue = getDefaultStore().get(downloadQueueAtom);
+                    getDefaultStore().set(downloadQueueAtom, [...downloadQueue, musicItem]);
+                }
+            }
+        }
 
         this.downloadNextPendingTask();
     }
