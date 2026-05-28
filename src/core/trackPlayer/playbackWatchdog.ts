@@ -1,8 +1,16 @@
 const NEAR_END_EPSILON_SEC = 1.5;
 const CORRUPT_DURATION_MAX_SEC = 2;
 const EOF_STUCK_MS = 2000;
+/** Shorter dwell when metadata reports ~1s total (00:01/00:01 WebDAV EOF stall). */
+const EOF_STUCK_CORRUPT_MS = 1000;
 const SENTINEL_STUCK_MS = 3000;
 const POSITION_STALL_MS = 3000;
+
+export function eofStuckThresholdMs(duration: number): number {
+    return duration > 0 && duration <= CORRUPT_DURATION_MAX_SEC
+        ? EOF_STUCK_CORRUPT_MS
+        : EOF_STUCK_MS;
+}
 
 export function isSentinelPlaybackUrl(
     url: string | undefined,
@@ -69,10 +77,11 @@ export function shouldTriggerEofWatchdog(input: EofWatchdogInput): boolean {
         return false;
     }
 
+    const eofDwellMs = eofStuckThresholdMs(input.duration);
     if (
         isStuckPlaybackStateAtEof(input.state) &&
         input.nearEndSince !== null &&
-        input.now - input.nearEndSince >= EOF_STUCK_MS
+        input.now - input.nearEndSince >= eofDwellMs
     ) {
         return true;
     }
@@ -159,8 +168,8 @@ export function shouldSkipPlaybackEndedFallback(
 }
 
 export const playbackWatchdogTiming = {
-    intervalMs: 2000,
     eofStuckMs: EOF_STUCK_MS,
+    eofStuckCorruptMs: EOF_STUCK_CORRUPT_MS,
     sentinelStuckMs: SENTINEL_STUCK_MS,
     positionStallMs: POSITION_STALL_MS,
 } as const;

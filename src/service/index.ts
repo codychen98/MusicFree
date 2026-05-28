@@ -7,6 +7,8 @@ import PersistStatus from "@/utils/persistStatus";
 
 let resumeState: State | null;
 module.exports = async function () {
+    TrackPlayer.registerPlaybackServiceHandlers();
+
     RNTrackPlayer.addEventListener(Event.RemotePlay, () => TrackPlayer.play());
     RNTrackPlayer.addEventListener(Event.RemotePause, () =>
         TrackPlayer.pause(),
@@ -58,6 +60,10 @@ module.exports = async function () {
 
     RNTrackPlayer.addEventListener(Event.PlaybackProgressUpdated, evt => {
         PersistStatus.set("music.progress", evt.position);
+        TrackPlayer.tickPlaybackWatchdog({
+            position: evt.position,
+            duration: evt.duration,
+        });
     });
 
     RNTrackPlayer.addEventListener(Event.RemoteStop, async () => {

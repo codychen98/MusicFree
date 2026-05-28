@@ -13,7 +13,6 @@ import { errorLog, trace } from "@/utils/log";
 import { logQueueSnapshot } from "@/utils/trackPlayerDebug";
 import {
     isNearEndOfTrack,
-    playbackWatchdogTiming,
     shouldSkipPlaybackEndedFallback,
     shouldTriggerEofWatchdog,
     shouldTriggerSentinelStuckWatchdog,
@@ -76,13 +75,16 @@ class TrackPlayer extends EventEmitter<{
     private currentIndex = -1;
     // 音乐播放器服务是否启动
     private serviceInited = false;
+    /** RNTP EOF / watchdog listeners (main app + playback service share one registration). */
+    private playbackHandlersRegistered = false;
     /** Prevents double auto-advance when sentinel + queue-ended/state-ended fire together. */
     private isAdvancingQueue = false;
-    private playbackWatchdogTimer: ReturnType<typeof setInterval> | null = null;
     private nearEndSince: number | null = null;
     private positionStallSince: number | null = null;
     private lastWatchdogPosition: number | null = null;
     private sentinelStuckSince: number | null = null;
+    /** Bumps on each `play()` so async native-queue prefetch cannot apply to a stale song. */
+    private nativeQueuePrefetchToken = 0;
     // 播放队列索引map
     private playListIndexMap = createMediaIndexMap([] as IMusic.IMusicItem[]);
 
@@ -202,102 +204,127 @@ class TrackPlayer extends EventEmitter<{
         }
 
         if (!this.serviceInited) {
+            this.serviceInited = true;
+        }
+    }
 
-            /**
-             * 此事件可能会被触发多次（比如直接替换queue） 参考代码：https://github.com/doublesymmetry/KotlinAudio
-             */
-            ReactNativeTrackPlayer.addEventListener(
-                Event.PlaybackActiveTrackChanged,
-                async evt => {
-                    const sentinelMatched =
-                        TrackPlayer.matchesSentinelTransition(evt);
-                    const trackInternalKey = (
-                        evt.track as (Track & { $?: string }) | undefined
-                    )?.$;
-                    await logQueueSnapshot("PlaybackActiveTrackChanged", {
-                        index: evt.index,
-                        lastIndex: evt.lastIndex,
-                        trackUrl: evt.track?.url,
-                        trackInternalKey,
-                        fakeAudioUrl: TrackPlayer.fakeAudioUrl,
-                        sentinelMatched,
+    /**
+     * Register EOF handlers on RNTP. Must run in the playback service context so
+     * auto-next still works when the screen is locked (main-app timers are throttled).
+     */
+    registerPlaybackServiceHandlers(): void {
+        if (this.playbackHandlersRegistered) {
+            return;
+        }
+        this.playbackHandlersRegistered = true;
+
+        /**
+         * 此事件可能会被触发多次（比如直接替换queue） 参考代码：https://github.com/doublesymmetry/KotlinAudio
+         */
+        ReactNativeTrackPlayer.addEventListener(
+            Event.PlaybackActiveTrackChanged,
+            async evt => {
+                const sentinelMatched =
+                    TrackPlayer.matchesSentinelTransition(evt);
+                const trackInternalKey = (
+                    evt.track as (Track & { $?: string }) | undefined
+                )?.$;
+                await logQueueSnapshot("PlaybackActiveTrackChanged", {
+                    index: evt.index,
+                    lastIndex: evt.lastIndex,
+                    trackUrl: evt.track?.url,
+                    trackInternalKey,
+                    fakeAudioUrl: TrackPlayer.fakeAudioUrl,
+                    sentinelMatched,
+                });
+                if (sentinelMatched) {
+                    await this.handlePlaybackEnded("sentinel");
+                    return;
+                }
+                if (
+                    evt.index === 1 &&
+                    evt.lastIndex === 0 &&
+                    TrackPlayer.isRealPlayableUrl(evt.track?.url)
+                ) {
+                    await this.onNativeQueueAdvancedToNext(
+                        evt.track as Track,
+                        "nativeRealNext",
+                    );
+                    return;
+                }
+                if (evt.index === 1 && evt.lastIndex === 0) {
+                    await this.repairSentinelQueueAtIndexOne(evt);
+                }
+            },
+        );
+
+        ReactNativeTrackPlayer.addEventListener(
+            Event.PlaybackQueueEnded,
+            async evt => {
+                await logQueueSnapshot("PlaybackQueueEnded", {
+                    track: evt.track,
+                    position: evt.position,
+                });
+                await this.handlePlaybackEnded("PlaybackQueueEnded");
+            },
+        );
+
+        ReactNativeTrackPlayer.addEventListener(
+            Event.PlaybackState,
+            async playbackState => {
+                if (playbackState.state !== State.Ended) {
+                    return;
+                }
+                await logQueueSnapshot("PlaybackState:Ended");
+                await this.handlePlaybackEnded("PlaybackState:Ended");
+            },
+        );
+
+        ReactNativeTrackPlayer.addEventListener(
+            Event.PlaybackError,
+            async e => {
+                errorLog("播放出错", e.message);
+                await logQueueSnapshot("PlaybackError", {
+                    message: e.message,
+                    code: e.code,
+                });
+                // WARNING: 不稳定，报错的时候有可能track已经变到下一首歌去了
+                const currentTrack =
+                    await ReactNativeTrackPlayer.getActiveTrack();
+                if (currentTrack?.isInit) {
+                    // HACK: 避免初始失败的情况
+                    ReactNativeTrackPlayer.updateMetadataForTrack(0, {
+                        ...currentTrack,
+                        // @ts-ignore
+                        isInit: undefined,
                     });
-                    if (
-                        evt.index === 1 &&
-                        evt.lastIndex === 0 &&
-                        !sentinelMatched
-                    ) {
-                        await this.repairSentinelQueueAtIndexOne(evt);
-                    }
-                    if (sentinelMatched) {
-                        await this.handlePlaybackEnded("sentinel");
-                    }
-                },
-            );
+                    return;
+                }
 
-            ReactNativeTrackPlayer.addEventListener(
-                Event.PlaybackQueueEnded,
-                async evt => {
-                    await logQueueSnapshot("PlaybackQueueEnded", {
-                        track: evt.track,
-                        position: evt.position,
-                    });
-                    await this.handlePlaybackEnded("PlaybackQueueEnded");
-                },
-            );
-
-            ReactNativeTrackPlayer.addEventListener(
-                Event.PlaybackState,
-                async playbackState => {
-                    if (playbackState.state !== State.Ended) {
-                        return;
-                    }
-                    await logQueueSnapshot("PlaybackState:Ended");
-                    await this.handlePlaybackEnded("PlaybackState:Ended");
-                },
-            );
-
-            ReactNativeTrackPlayer.addEventListener(
-                Event.PlaybackError,
-                async e => {
-                    errorLog("播放出错", e.message);
-                    await logQueueSnapshot("PlaybackError", {
+                if (
+                    !TrackPlayer.isSentinelUrl(currentTrack?.url) &&
+                    currentTrack?.url !== TrackPlayer.proposedAudioUrl &&
+                    (await ReactNativeTrackPlayer.getActiveTrackIndex()) === 0 &&
+                    e.message &&
+                    e.message !== "android-io-file-not-found"
+                ) {
+                    trace("播放出错", {
                         message: e.message,
                         code: e.code,
                     });
-                    // WARNING: 不稳定，报错的时候有可能track已经变到下一首歌去了
-                    const currentTrack =
-                        await ReactNativeTrackPlayer.getActiveTrack();
-                    if (currentTrack?.isInit) {
-                        // HACK: 避免初始失败的情况
-                        ReactNativeTrackPlayer.updateMetadataForTrack(0, {
-                            ...currentTrack,
-                            // @ts-ignore
-                            isInit: undefined,
-                        });
-                        return;
-                    }
 
-                    if (
-                        !TrackPlayer.isSentinelUrl(currentTrack?.url) &&
-                        currentTrack?.url !== TrackPlayer.proposedAudioUrl &&
-                        (await ReactNativeTrackPlayer.getActiveTrackIndex()) === 0 &&
-                        e.message &&
-                        e.message !== "android-io-file-not-found"
-                    ) {
-                        trace("播放出错", {
-                            message: e.message,
-                            code: e.code,
-                        });
+                    this.handlePlayFail();
+                }
+            },
+        );
+    }
 
-                        this.handlePlayFail();
-                    }
-                },
-            );
-
-            this.startPlaybackWatchdog();
-            this.serviceInited = true;
-        }
+    /** Called from playback service on each native progress tick (works while screen is locked). */
+    tickPlaybackWatchdog(progress?: {
+        position: number;
+        duration: number;
+    }): void {
+        void this.runPlaybackWatchdog(progress);
     }
 
     /**************** 播放队列 ******************/
@@ -557,6 +584,7 @@ class TrackPlayer extends EventEmitter<{
             }
 
             // 4. 更新列表状态和当前音乐
+            this.nativeQueuePrefetchToken += 1;
             this.setCurrentMusic(musicItem);
             await ReactNativeTrackPlayer.setQueue([{
                 ...musicItem,
@@ -1029,12 +1057,27 @@ class TrackPlayer extends EventEmitter<{
         );
     }
 
+    /**
+     * RNTP only holds [now playing, tail]. The app playlist is authoritative;
+     * tail should be the real next song when possible so the native player can
+     * advance without the fake sentinel (see prefetchAndUpdateNativeQueueTail).
+     */
     private async ensureSentinelQueue(realTrack: Track): Promise<void> {
         const queue = await ReactNativeTrackPlayer.getQueue();
+        const expectedNext =
+            this.repeatMode === MusicRepeatMode.SINGLE
+                ? null
+                : this.getPlayListMusicAt(this.currentIndex + 1);
+        const tailIsPrefetchedReal =
+            expectedNext &&
+            queue[1] &&
+            TrackPlayer.isRealPlayableUrl(queue[1].url) &&
+            isSameMediaItem(queue[1] as IMusic.IMusicItem, expectedNext);
         const needsRepair =
             queue.length !== 2 ||
-            !TrackPlayer.isSentinelUrl(queue[1]?.url) ||
-            queue[0]?.url !== realTrack.url;
+            queue[0]?.url !== realTrack.url ||
+            (!tailIsPrefetchedReal &&
+                !TrackPlayer.isSentinelUrl(queue[1]?.url));
         if (needsRepair) {
             await ReactNativeTrackPlayer.setQueue([
                 realTrack,
@@ -1045,6 +1088,135 @@ class TrackPlayer extends EventEmitter<{
             await ReactNativeTrackPlayer.getActiveTrackIndex();
         if (activeIndex !== 0) {
             await ReactNativeTrackPlayer.skip(0);
+        }
+        const anchor = this.currentMusic;
+        if (anchor && this.repeatMode !== MusicRepeatMode.SINGLE) {
+            void this.prefetchAndUpdateNativeQueueTail(anchor, realTrack);
+        }
+    }
+
+    private async resolveMediaSourceForItem(
+        musicItem: IMusic.IMusicItem,
+    ): Promise<IPlugin.IMediaSourceResult | null> {
+        const plugin = this.pluginManagerService.getByName(musicItem.platform);
+        const qualityOrder = getQualityOrder(
+            this.configService.getConfig("basic.defaultPlayQuality") ??
+                "standard",
+            this.configService.getConfig("basic.playQualityOrder") ?? "asc",
+        );
+        for (const quality of qualityOrder) {
+            const source =
+                (await plugin?.methods?.getMediaSource(musicItem, quality)) ??
+                null;
+            if (source?.url) {
+                return source;
+            }
+        }
+        if (musicItem.source) {
+            for (const quality of qualityOrder) {
+                if (musicItem.source[quality]?.url) {
+                    return musicItem.source[quality]!;
+                }
+            }
+        }
+        if (musicItem.url) {
+            return { url: musicItem.url };
+        }
+        return null;
+    }
+
+    /** Put the real next app-playlist track at RNTP index 1 so EOF can advance natively. */
+    private async prefetchAndUpdateNativeQueueTail(
+        anchorItem: IMusic.IMusicItem,
+        track0: Track,
+    ): Promise<void> {
+        if (this.repeatMode === MusicRepeatMode.SINGLE) {
+            return;
+        }
+        const token = this.nativeQueuePrefetchToken;
+        const anchorIndex = this.getMusicIndexInPlayList(anchorItem);
+        const nextItem = this.getPlayListMusicAt(anchorIndex + 1);
+        if (!nextItem) {
+            return;
+        }
+
+        const source = await this.resolveMediaSourceForItem(nextItem);
+        if (token !== this.nativeQueuePrefetchToken) {
+            return;
+        }
+        if (!this.isCurrentMusic(anchorItem)) {
+            return;
+        }
+        const stillNext = this.getPlayListMusicAt(this.currentIndex + 1);
+        if (!stillNext || !isSameMediaItem(nextItem, stillNext)) {
+            return;
+        }
+        if (!source?.url) {
+            return;
+        }
+
+        let track1 = this.mergeTrackSource(nextItem, source) as IMusic.IMusicItem;
+        if (getUrlExt(source.url) === ".m3u8") {
+            // @ts-ignore
+            track1 = { ...track1, type: "hls" };
+        }
+        const patchedNext = this.patchMediaArtwork(track1 as Track);
+        if (!patchedNext) {
+            return;
+        }
+
+        const activeIndex =
+            await ReactNativeTrackPlayer.getActiveTrackIndex();
+        if (activeIndex !== 0) {
+            return;
+        }
+        const queue = await ReactNativeTrackPlayer.getQueue();
+        if (
+            queue.length !== 2 ||
+            !isSameMediaItem(queue[0] as IMusic.IMusicItem, anchorItem)
+        ) {
+            return;
+        }
+
+        await ReactNativeTrackPlayer.setQueue([track0, patchedNext]);
+        await logQueueSnapshot("prefetchNativeQueueTail", {
+            anchorId: anchorItem.id,
+            nextId: nextItem.id,
+            nextUrl: patchedNext.url,
+        });
+    }
+
+    /** RNTP advanced to a prefetched real track; sync app playlist index / UI. */
+    private async onNativeQueueAdvancedToNext(
+        track: Track,
+        reason: string,
+    ): Promise<void> {
+        if (this.isAdvancingQueue) {
+            return;
+        }
+        const expectedNext = this.getPlayListMusicAt(this.currentIndex + 1);
+        if (
+            !expectedNext ||
+            !isSameMediaItem(track as IMusic.IMusicItem, expectedNext)
+        ) {
+            return;
+        }
+
+        this.isAdvancingQueue = true;
+        try {
+            this.emit(TrackPlayerEvents.PlayEnd);
+            this.musicHistoryService.addMusic(expectedNext);
+            this.setCurrentMusic(expectedNext);
+            trace(
+                "nativeQueueAdvanced",
+                JSON.stringify({
+                    reason,
+                    id: expectedNext.id,
+                    title: expectedNext.title,
+                }),
+            );
+        } finally {
+            this.isAdvancingQueue = false;
         }
     }
 
@@ -1145,15 +1317,6 @@ class TrackPlayer extends EventEmitter<{
         }
     }
 
-    private startPlaybackWatchdog(): void {
-        if (this.playbackWatchdogTimer) {
-            return;
-        }
-        this.playbackWatchdogTimer = setInterval(() => {
-            void this.runPlaybackWatchdog();
-        }, playbackWatchdogTiming.intervalMs);
-    }
-
     private resetWatchdogTimingState(): void {
         this.nearEndSince = null;
         this.positionStallSince = null;
@@ -1161,7 +1324,10 @@ class TrackPlayer extends EventEmitter<{
         this.sentinelStuckSince = null;
     }
 
-    private async runPlaybackWatchdog(): Promise<void> {
+    private async runPlaybackWatchdog(progressHint?: {
+        position: number;
+        duration: number;
+    }): Promise<void> {
         if (this.isAdvancingQueue || this.isPlayListEmpty()) {
             this.resetWatchdogTimingState();
             return;
@@ -1169,15 +1335,22 @@ class TrackPlayer extends EventEmitter<{
 
         try {
             const now = Date.now();
-            const [activeIndex, playbackState, progress, activeTrack] =
-                await Promise.all([
-                    ReactNativeTrackPlayer.getActiveTrackIndex(),
-                    ReactNativeTrackPlayer.getPlaybackState(),
-                    ReactNativeTrackPlayer.getProgress(),
-                    ReactNativeTrackPlayer.getActiveTrack(),
-                ]);
+            const [activeIndex, playbackState, activeTrack] = await Promise.all([
+                ReactNativeTrackPlayer.getActiveTrackIndex(),
+                ReactNativeTrackPlayer.getPlaybackState(),
+                ReactNativeTrackPlayer.getActiveTrack(),
+            ]);
             const state = playbackState.state;
-            const { position, duration } = progress;
+            let position: number;
+            let duration: number;
+            if (progressHint) {
+                position = progressHint.position;
+                duration = progressHint.duration;
+            } else {
+                const progress = await ReactNativeTrackPlayer.getProgress();
+                position = progress.position;
+                duration = progress.duration;
+            }
             const activeUrl = activeTrack?.url;
 
             if (

@@ -1,4 +1,5 @@
 import {
+    eofStuckThresholdMs,
     isNearEndOfTrack,
     shouldSkipPlaybackEndedFallback,
     shouldTriggerEofWatchdog,
@@ -61,6 +62,34 @@ describe("shouldTriggerEofWatchdog", () => {
                 now: 4000,
             }),
         ).toBe(true);
+    });
+
+    it("uses shorter dwell for corrupt 00:01/00:01 metadata", () => {
+        expect(eofStuckThresholdMs(1)).toBe(1000);
+        expect(
+            shouldTriggerEofWatchdog({
+                activeIndex: 0,
+                state: "loading",
+                position: 1,
+                duration: 1,
+                playListLength: 2,
+                nearEndSince: 1000,
+                positionStallSince: null,
+                now: 2100,
+            }),
+        ).toBe(true);
+        expect(
+            shouldTriggerEofWatchdog({
+                activeIndex: 0,
+                state: "loading",
+                position: 1,
+                duration: 1,
+                playListLength: 2,
+                nearEndSince: 1000,
+                positionStallSince: null,
+                now: 1999,
+            }),
+        ).toBe(false);
     });
 });
 
