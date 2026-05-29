@@ -13,12 +13,12 @@ import axios from "axios";
 import { ResumeMode } from "@/constants/commonConst.ts";
 import Config, { useAppConfig } from "@/core/appConfig";
 import {
-    WEBDAV_REMOTE_BACKUP_FILE,
-    cancelScheduledWebdavUpload,
-    uploadBackupToWebdav,
-} from "@/core/webdav-sync/upload";
+    fetchRemoteBackupRaw,
+    pullWebdavSnapshotWithOverwriteGate,
+} from "@/core/webdav-sync/bootstrap";
+import { cancelScheduledWebdavUpload, uploadBackupToWebdav } from "@/core/webdav-sync/upload";
 import {
-    clearWebdavPendingPushAfterManualRestore,
+    isWebdavCredentialsComplete,
     recordWebdavUploadSuccess,
 } from "@/core/webdav-sync/config";
 import { useI18N } from "@/core/i18n";
@@ -27,8 +27,6 @@ import { writeInChunks } from "@/utils/fileUtils.ts";
 import { errorLog } from "@/utils/log.ts";
 import { getDocumentAsync } from "expo-document-picker";
 import { readAsStringAsync } from "expo-file-system";
-import { AuthType, createClient } from "webdav";
-
 export default function BackupSetting() {
     const { t } = useI18N();
     const navigate = useNavigate();
@@ -150,39 +148,23 @@ export default function BackupSetting() {
     }
 
     async function onResumeFromWebdav() {
-        const url = Config.getConfig("webdav.url");
-        const username = Config.getConfig("webdav.username");
-        const password = Config.getConfig("webdav.password");
-
-        if (!(username && password && url)) {
+        if (!isWebdavCredentialsComplete()) {
             Toast.warn(t("toast.resumePreCheckFailed"));
-            return;
-        }
-        const client = createClient(url, {
-            authType: AuthType.Password,
-            username: username,
-            password: password,
-        });
-
-        if (!(await client.exists(WEBDAV_REMOTE_BACKUP_FILE))) {
-            Toast.warn(t("toast.backupFileNotFound"));
             return;
         }
 
         cancelScheduledWebdavUpload();
 
         try {
-            const resumeData = await client.getFileContents(
-                WEBDAV_REMOTE_BACKUP_FILE,
-                {
-                    format: "text",
-                },
-            );
-            await Backup.resume(
-                resumeData,
-                Config.getConfig("backup.resumeMode"),
-            );
-            clearWebdavPendingPushAfterManualRestore();
+            const raw = await fetchRemoteBackupRaw();
+            if (raw === null) {
+                Toast.warn(t("toast.backupFileNotFound"));
+                return;
+            }
+            const result = await pullWebdavSnapshotWithOverwriteGate(raw);
+            if (result === "cancelled") {
+                return;
+            }
             Toast.success(t("toast.resumeSuccess"));
         } catch (e: any) {
             Toast.warn(t("toast.resumeFail", { reason: e?.message ?? e }));

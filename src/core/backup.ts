@@ -71,6 +71,14 @@ interface IBackupResumeOptions {
     fullSheetOverwrite?: boolean;
 }
 
+/**
+ * WebDAV pull: local playlists match remote exactly (add missing, remove extras).
+ * Used by auto-sync and manual restore — not the Settings "resume mode" merge options.
+ */
+async function resumeFromWebdavRemote(raw: string | Object) {
+    return resume(raw, ResumeMode.Append, { fullSheetOverwrite: true });
+}
+
 async function resume(
     raw: string | Object,
     resumeMode: ResumeMode = ResumeMode.Append,
@@ -118,6 +126,7 @@ async function resume(
 const Backup = {
     backup,
     resume,
+    resumeFromWebdavRemote,
     stringifyWebdavBackupWithSyncMeta,
 };
 export default Backup;

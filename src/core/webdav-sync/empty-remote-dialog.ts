@@ -1,7 +1,7 @@
 import { showDialog } from "@/components/dialogs/useDialog";
 import i18n from "@/core/i18n";
 
-/** Blocking confirm before applying an empty remote overwrite (auto-sync bootstrap). */
+/** Blocking confirm before applying an empty remote overwrite (auto-sync and manual restore). */
 export function confirmEmptyRemoteOverwrite(): Promise<boolean> {
     return new Promise((resolve) => {
         let settled = false;

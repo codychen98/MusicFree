@@ -1,4 +1,3 @@
-import { ResumeMode } from "@/constants/commonConst.ts";
 import Backup from "@/core/backup";
 import Config from "@/core/appConfig";
 import MusicSheet from "@/core/musicSheet";
@@ -71,16 +70,46 @@ export async function fetchRemoteBackupRaw(): Promise<string | null> {
     })) as string;
 }
 
-async function autoPullFromRemote(raw: string): Promise<void> {
-    await Backup.resume(raw, ResumeMode.Append, {
-        fullSheetOverwrite: true,
-    });
+/** Replace local playlists with remote snapshot; clear stale pending-push flag. */
+export async function applyWebdavRemoteBackupRaw(raw: string): Promise<void> {
+    await Backup.resumeFromWebdavRemote(raw);
     clearWebdavPendingPushAfterManualRestore();
+}
+
+export type WebdavPullOverwriteResult = "applied" | "cancelled";
+
+/**
+ * Full overwrite from WebDAV (remote source of truth).
+ * Empty remote + non-empty local: same confirmation as auto-sync before wiping local.
+ */
+export async function pullWebdavSnapshotWithOverwriteGate(
+    raw: string,
+): Promise<WebdavPullOverwriteResult> {
+    const remoteTrackCount = countTracksInBackup(raw);
+    const localTrackCount = countLocalTracks();
+
+    if (remoteTrackCount === 0 && localTrackCount > 0) {
+        webdavSyncLog(
+            "pull: empty remote with local data — empty-remote confirm",
+        );
+        const confirmed = await confirmEmptyRemoteOverwrite();
+        if (!confirmed) {
+            webdavSyncLog("pull: user cancelled empty remote overwrite");
+            return "cancelled";
+        }
+        webdavSyncLog("pull: user confirmed empty remote overwrite");
+    }
+
+    await applyWebdavRemoteBackupRaw(raw);
+    webdavSyncLog(
+        `pull: full overwrite finished (${remoteTrackCount} remote track(s))`,
+    );
+    return "applied";
 }
 
 /**
  * Remote-wins sync (cold start and foreground resume): when `MusicFreeBackup.json` exists
- * on WebDAV, always pull with full sheet overwrite (remote is source of truth).
+ * on WebDAV, pull with full sheet overwrite (remote is source of truth).
  * `webdav.pendingPush` does not skip pull.
  * Empty remote + non-empty local: blocking dialog before overwrite (Desktop D6 / Android A4).
  * No remote file: push local snapshot if pending, so first backup can be created.
@@ -120,40 +149,10 @@ export async function runWebdavBootstrapSync(): Promise<void> {
         return;
     }
 
-    const remoteTrackCount = countTracksInBackup(raw);
-    const localTrackCount = countLocalTracks();
-
-    if (remoteTrackCount === 0 && localTrackCount > 0) {
-        webdavSyncLog(
-            "bootstrap: empty remote with local data — empty-remote confirm",
-        );
-        const confirmed = await confirmEmptyRemoteOverwrite();
-        if (!confirmed) {
-            webdavSyncLog("bootstrap: user cancelled empty remote overwrite");
-            return;
-        }
-        webdavSyncLog("bootstrap: user confirmed empty remote overwrite");
-        try {
-            await autoPullFromRemote(raw);
-            webdavSyncLog("bootstrap: empty-remote pull finished");
-        } catch (error: unknown) {
-            webdavSyncLog("bootstrap: empty-remote pull failed", error);
-        }
-        return;
-    }
-
-    if (remoteTrackCount === 0) {
-        webdavSyncLog("bootstrap: remote and local empty — nothing to pull");
-        return;
-    }
-
-    webdavSyncLog(
-        `bootstrap: auto-pull ${remoteTrackCount} remote track(s) (overwrite)`,
-    );
     try {
-        await autoPullFromRemote(raw);
-        webdavSyncLog("bootstrap: auto-pull finished");
+        const result = await pullWebdavSnapshotWithOverwriteGate(raw);
+        webdavSyncLog(`bootstrap: pull ${result}`);
     } catch (error: unknown) {
-        webdavSyncLog("bootstrap: auto-pull failed", error);
+        webdavSyncLog("bootstrap: pull failed", error);
     }
 }
