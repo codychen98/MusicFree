@@ -79,8 +79,9 @@ async function autoPullFromRemote(raw: string): Promise<void> {
 }
 
 /**
- * Cold-start sync: when `MusicFreeBackup.json` exists on WebDAV, always pull with full
- * sheet overwrite (remote is source of truth). `webdav.pendingPush` does not skip pull.
+ * Remote-wins sync (cold start and foreground resume): when `MusicFreeBackup.json` exists
+ * on WebDAV, always pull with full sheet overwrite (remote is source of truth).
+ * `webdav.pendingPush` does not skip pull.
  * Empty remote + non-empty local: blocking dialog before overwrite (Desktop D6 / Android A4).
  * No remote file: push local snapshot if pending, so first backup can be created.
  */

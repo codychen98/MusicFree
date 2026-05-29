@@ -6,6 +6,7 @@ import { emptyFunction, localPluginHash, supportLocalMediaType } from "@/constan
 import pathConst from "@/constants/pathConst";
 import Config from "@/core/appConfig";
 import { runWebdavBootstrapSync } from "@/core/webdav-sync/bootstrap";
+import { setupWebdavResumeSync } from "@/core/webdav-sync/resume";
 import { runWithoutWebdavSyncNotify } from "@/core/webdav-sync/suppress";
 import { setupWebdavAutoSync } from "@/core/webdav-sync/upload";
 import downloader, { DownloadFailReason, DownloaderEvent } from "@/core/downloader";
@@ -110,6 +111,7 @@ async function bootstrapImpl() {
     trace("插件初始化完成");
 
     await runWebdavBootstrapSync();
+    setupWebdavResumeSync();
 
     await initTrackPlayer(logger).catch(err => {
         // 初始化播放器出错，延迟初始化
