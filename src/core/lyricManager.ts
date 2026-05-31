@@ -35,6 +35,9 @@ const defaultLyricState = {
 /** Abort hung plugin lyric fetches so EOF/stuck playback does not leave 加载中... forever. */
 const LYRIC_FETCH_TIMEOUT_MS = 15_000;
 
+/** UI retry when lyrics stay on loading with no successful refresh (see lyric tab watchdog). */
+export const LYRIC_UI_STUCK_RETRY_MS = 3_000;
+
 const lyricStateAtom = atom<ILyricState>(defaultLyricState);
 const currentLyricItemAtom = atom<IParsedLrcItem | null>(null);
 
@@ -47,6 +50,8 @@ class LyricManager implements IInjectable {
 
     private lyricParser: LyricParser | null = null;
 
+    /** Monotonic id; only the latest refreshLyric call may commit lyric state. */
+    private lyricRefreshGeneration = 0;
 
     get currentLyricItem() {
         return getDefaultStore().get(currentLyricItemAtom);
@@ -65,7 +70,8 @@ class LyricManager implements IInjectable {
     setup() {
         // 更新歌词
         this.trackPlayer.on(TrackPlayerEvents.CurrentMusicChanged, (musicItem) => {
-            this.refreshLyric(true, true);
+            const forceRefetch = this.lyricState.loading;
+            this.refreshLyric(!forceRefetch, true);
 
             if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
                 if (musicItem) {
@@ -227,6 +233,15 @@ class LyricManager implements IInjectable {
         }
     }
 
+    /** Force a lyric reload for the current track (e.g. after stuck loading UI). */
+    retryCurrentLyric() {
+        this.refreshLyric(false, false);
+    }
+
+    private isActiveLyricRefresh(generation: number): boolean {
+        return generation === this.lyricRefreshGeneration;
+    }
+
     private setLyricAsLoadingState() {
         getDefaultStore().set(lyricStateAtom, {
             loading: true,
@@ -264,30 +279,46 @@ class LyricManager implements IInjectable {
         });
     }
 
-    /** Clear loading when a fetch is abandoned and nothing else owns lyric state yet. */
-    private clearLyricLoadingIfFetchAbandoned(requestedMusic: IMusic.IMusicItem) {
-        const current = this.trackPlayer.currentMusic;
-        if (!current || isSameMediaItem(current, requestedMusic)) {
-            this.setLyricAsNoLyricState();
-        }
+    private canCommitLyricRefresh(
+        generation: number,
+        musicItem: IMusic.IMusicItem,
+    ): boolean {
+        return (
+            this.isActiveLyricRefresh(generation) &&
+            this.trackPlayer.isCurrentMusic(musicItem)
+        );
     }
 
     private async refreshLyric(skipFetchLyricSourceIfSame: boolean = true, ignoreProgress: boolean = false) {
+        const generation = ++this.lyricRefreshGeneration;
         const currentMusicItem = this.trackPlayer.currentMusic;
 
         // 如果没有当前音乐项，重置歌词状态
         if (!currentMusicItem) {
-            this.setLyricAsNoLyricState();
+            if (this.isActiveLyricRefresh(generation)) {
+                this.lyricParser = null;
+                this.setLyricAsNoLyricState();
+            }
             return;
         }
+
+        let committed = false;
 
         try {
             let lrcSource: ILyric.ILyricSource | null;
 
-            if (skipFetchLyricSourceIfSame && this.lyricParser && this.trackPlayer.isCurrentMusic(this.lyricParser.musicItem)) {
-                lrcSource = this.lyricParser.lyricSource ?? null;
+            const canUseCachedParser =
+                skipFetchLyricSourceIfSame &&
+                this.lyricParser &&
+                this.trackPlayer.isCurrentMusic(this.lyricParser.musicItem);
+
+            if (canUseCachedParser) {
+                lrcSource = this.lyricParser!.lyricSource ?? null;
             } else {
-                // 重置歌词状态
+                if (!this.canCommitLyricRefresh(generation, currentMusicItem)) {
+                    return;
+                }
+                this.lyricParser = null;
                 this.setLyricAsLoadingState();
 
                 const getLyric = this.pluginManager
@@ -299,15 +330,12 @@ class LyricManager implements IInjectable {
                         : null;
             }
 
-            // 切换到其他歌曲了, 直接返回
-            if (!this.trackPlayer.isCurrentMusic(currentMusicItem)) {
-                this.clearLyricLoadingIfFetchAbandoned(currentMusicItem);
+            if (!this.canCommitLyricRefresh(generation, currentMusicItem)) {
                 return;
             }
 
             // 如果歌词源不存在，并且开启自动搜索歌词
             if (!lrcSource && this.appConfig.getConfig("lyric.autoSearchLyric")) {
-                // 重置歌词状态
                 this.setLyricAsLoadingState();
 
                 lrcSource =
@@ -316,16 +344,15 @@ class LyricManager implements IInjectable {
                     )) ?? null;
             }
 
-            // 切换到其他歌曲了, 直接返回
-            if (!this.trackPlayer.isCurrentMusic(currentMusicItem)) {
-                this.clearLyricLoadingIfFetchAbandoned(currentMusicItem);
+            if (!this.canCommitLyricRefresh(generation, currentMusicItem)) {
                 return;
             }
 
             // 如果源不存在，恢复默认设置
             if (!lrcSource) {
-                this.setLyricAsNoLyricState();
                 this.lyricParser = null;
+                this.setLyricAsNoLyricState();
+                committed = true;
                 return;
             }
 
@@ -361,8 +388,20 @@ class LyricManager implements IInjectable {
                     LyricUtil.setStatusBarLyricText(musicItem ? `${musicItem.title} - ${musicItem.artist}` : "MusicFree");
                 }
             }
-        } catch (err) {
-            if (this.trackPlayer.isCurrentMusic(currentMusicItem)) {
+
+            committed = true;
+        } catch {
+            if (this.canCommitLyricRefresh(generation, currentMusicItem)) {
+                this.lyricParser = null;
+                this.setLyricAsNoLyricState();
+                committed = true;
+            }
+        } finally {
+            if (
+                this.isActiveLyricRefresh(generation) &&
+                !committed &&
+                this.trackPlayer.isCurrentMusic(currentMusicItem)
+            ) {
                 this.lyricParser = null;
                 this.setLyricAsNoLyricState();
             }

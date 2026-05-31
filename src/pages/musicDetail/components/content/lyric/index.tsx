@@ -17,7 +17,7 @@ import LyricOperations from "./lyricOperations";
 import { IParsedLrcItem } from "@/utils/lrcParser";
 import { IconButtonWithGesture } from "@/components/base/iconButton.tsx";
 import { getMediaExtraProperty } from "@/utils/mediaExtra";
-import lyricManager, { useCurrentLyricItem, useLyricState } from "@/core/lyricManager";
+import lyricManager, { LYRIC_UI_STUCK_RETRY_MS, useCurrentLyricItem, useLyricState } from "@/core/lyricManager";
 import { useI18N } from "@/core/i18n";
 
 const ITEM_HEIGHT = rpx(92);
@@ -162,6 +162,26 @@ export default function Lyric(props: IProps) {
             isMountedRef.current = false;
         };
     }, []);
+
+    // Recover from orphaned loading state (no in-flight refresh) without force-close.
+    useEffect(() => {
+        if (!loading || !currentMusicItem) {
+            return;
+        }
+        const trackKey = `${currentMusicItem.platform}@${currentMusicItem.id}`;
+        const timer = setTimeout(() => {
+            const playing = TrackPlayer.currentMusic;
+            if (
+                !lyricManager.lyricState.loading ||
+                !playing ||
+                `${playing.platform}@${playing.id}` !== trackKey
+            ) {
+                return;
+            }
+            lyricManager.retryCurrentLyric();
+        }, LYRIC_UI_STUCK_RETRY_MS);
+        return () => clearTimeout(timer);
+    }, [loading, currentMusicItem?.id, currentMusicItem?.platform]);
 
     // 开始滚动时拖拽生效
     const onScrollBeginDrag = () => {
