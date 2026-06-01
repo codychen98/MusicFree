@@ -2,7 +2,7 @@ import type { ResumeMode, SortType } from "@/constants/commonConst.ts";
 import type { CustomizedColors } from "@/hooks/useColors";
 
 export interface IAppConfigProperties {
-    $schema: "3";
+    $schema: "4";
     // Basic
     "basic.autoPlayWhenAppStart": boolean;
     "basic.useCelluarNetworkPlay": boolean;
@@ -45,6 +45,10 @@ export interface IAppConfigProperties {
     "lyric.fontSize": number;
     "lyric.detailFontSize": number;
     "lyric.autoSearchLyric": boolean;
+    /** Desktop overlay: 1 = current line; 2 = current + next; 3 = current + next two */
+    "lyric.desktopLineCount": 1 | 2 | 3;
+    /** Force desktop lyrics off on process cold start (not background resume) */
+    "lyric.resetDesktopLyricOnStartup": boolean;
 
     // Theme
     "theme.background": string;

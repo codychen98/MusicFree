@@ -69,6 +69,9 @@ class LyricUtilModule(private val reactContext: ReactApplicationContext): ReactC
                     if (options.hasKey("fontSize")) {
                         put("fontSize", options.getDouble("fontSize"))
                     }
+                    if (options.hasKey("maxLines")) {
+                        put("maxLines", options.getInt("maxLines"))
+                    }
                 }
 
                 try {
@@ -148,6 +151,18 @@ class LyricUtilModule(private val reactContext: ReactApplicationContext): ReactC
         try {
             UiThreadUtil.runOnUiThread {
                 lyricView?.setWidth(pct)
+            }
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("Exception", e.message)
+        }
+    }
+
+    @ReactMethod
+    fun setStatusBarLyricMaxLines(maxLines: Int, promise: Promise) {
+        try {
+            UiThreadUtil.runOnUiThread {
+                lyricView?.setMaxLines(maxLines)
             }
             promise.resolve(true)
         } catch (e: Exception) {

@@ -11,6 +11,12 @@ import { runWithoutWebdavSyncNotify } from "@/core/webdav-sync/suppress";
 import { setupWebdavAutoSync } from "@/core/webdav-sync/upload";
 import downloader, { DownloadFailReason, DownloaderEvent } from "@/core/downloader";
 import LocalMusicSheet from "@/core/localMusicSheet";
+import { applyResetDesktopLyricOnStartup } from "@/core/lyric/resetDesktopLyricOnStartup";
+import {
+    beginTrackPlayerInit,
+    markTrackPlayerReady,
+} from "@/core/control/trackPlayerReadiness";
+import "@/core/control/registerMusicFreeControlListener";
 import lyricManager from "@/core/lyricManager";
 import musicHistory from "@/core/musicHistory";
 import MusicSheet from "@/core/musicSheet";
@@ -160,60 +166,67 @@ async function setupFolder() {
 }
 
 export async function initTrackPlayer(logger?: IPerfLogger) {
+    beginTrackPlayerInit();
     try {
-        await RNTrackPlayer.setupPlayer({
-            maxCacheSize:
-                Config.getConfig("basic.maxCacheSize") ?? 1024 * 1024 * 512,
-        });
-    } catch (e: any) {
-        if (
-            e?.message !==
-            "The player has already been initialized via setupPlayer."
-        ) {
-            throw e;
+        try {
+            await RNTrackPlayer.setupPlayer({
+                maxCacheSize:
+                    Config.getConfig("basic.maxCacheSize") ?? 1024 * 1024 * 512,
+            });
+        } catch (e: any) {
+            if (
+                e?.message !==
+                "The player has already been initialized via setupPlayer."
+            ) {
+                throw e;
+            }
         }
+        logger?.mark("加载播放器");
+
+        const capabilities = Config.getConfig("basic.showExitOnNotification")
+            ? [
+                Capability.SkipToPrevious,
+                Capability.Play,
+                Capability.Pause,
+                Capability.SkipToNext,
+                Capability.Stop,
+            ]
+            : [
+                Capability.Play,
+                Capability.Pause,
+                Capability.SkipToNext,
+                Capability.SkipToPrevious,
+            ];
+        await RNTrackPlayer.updateOptions({
+            icon: ImgAsset.logoTransparent,
+            stopIcon: ImgAsset.notificationExit,
+            progressUpdateEventInterval: 1,
+            android: {
+                alwaysPauseOnInterruption: true,
+                appKilledPlaybackBehavior:
+                    AppKilledPlaybackBehavior.ContinuePlayback,
+            },
+            capabilities: capabilities,
+            compactCapabilities: capabilities,
+            // Omit SeekTo here: it was appended after Stop and showed as a second
+            // square that often matched Stop behavior. Scrubbing still uses RemoteSeek.
+            notificationCapabilities: capabilities,
+        });
+        logger?.mark("播放器初始化完成");
+        trace("播放器初始化完成");
+
+        await TrackPlayer.setupTrackPlayer();
+        trace("播放列表初始化完成");
+        logger?.mark("播放列表初始化完成");
+
+        await applyResetDesktopLyricOnStartup();
+
+        await lyricManager.setup();
+
+        logger?.mark("歌词初始化完成");
+    } finally {
+        markTrackPlayerReady();
     }
-    logger?.mark("加载播放器");
-
-    const capabilities = Config.getConfig("basic.showExitOnNotification")
-        ? [
-            Capability.SkipToPrevious,
-            Capability.Play,
-            Capability.Pause,
-            Capability.SkipToNext,
-            Capability.Stop,
-        ]
-        : [
-            Capability.Play,
-            Capability.Pause,
-            Capability.SkipToNext,
-            Capability.SkipToPrevious,
-        ];
-    await RNTrackPlayer.updateOptions({
-        icon: ImgAsset.logoTransparent,
-        stopIcon: ImgAsset.notificationExit,
-        progressUpdateEventInterval: 1,
-        android: {
-            alwaysPauseOnInterruption: true,
-            appKilledPlaybackBehavior:
-                AppKilledPlaybackBehavior.ContinuePlayback,
-        },
-        capabilities: capabilities,
-        compactCapabilities: capabilities,
-        // Omit SeekTo here: it was appended after Stop and showed as a second
-        // square that often matched Stop behavior. Scrubbing still uses RemoteSeek.
-        notificationCapabilities: capabilities,
-    });
-    logger?.mark("播放器初始化完成");
-    trace("播放器初始化完成");
-
-    await TrackPlayer.setupTrackPlayer();
-    trace("播放列表初始化完成");
-    logger?.mark("播放列表初始化完成");
-
-    await lyricManager.setup();
-
-    logger?.mark("歌词初始化完成");
 }
 
 

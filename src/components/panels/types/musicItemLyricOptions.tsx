@@ -111,12 +111,14 @@ export default function MusicItemLyricOptions(
                             backgroundColor: Config.getConfig("lyric.backgroundColor"),
                             widthPercent: Config.getConfig("lyric.widthPercent"),
                             fontSize: Config.getConfig("lyric.fontSize"),
+                            maxLines: Config.getConfig("lyric.desktopLineCount") ?? 1,
                         };
                         LyricUtil.showStatusBarLyric(
                             "MusicFree",
                             statusBarLyricConfig ?? {}
                         );
                         Config.setConfig("lyric.showStatusBarLyric", true);
+                        lyricManager.refreshDesktopLyricOverlay();
                     } else {
                         LyricUtil.requestSystemAlertPermission().finally(() => {
                             Toast.warn(t("panel.musicItemLyricOptions.desktopLyricPermissionError"));

@@ -8,6 +8,7 @@ import { showPanel } from "@/components/panels/usePanel";
 import { SortType } from "@/constants/commonConst.ts";
 import pathConst from "@/constants/pathConst";
 import Config, { useAppConfig } from "@/core/appConfig";
+import lyricManager from "@/core/lyricManager";
 import {
     getWebdavDownloadTargetSummary,
     isWebdavDownloadTargetAvailable,
@@ -767,8 +768,10 @@ function LyricSetting() {
     const widthPercent = useAppConfig("lyric.widthPercent");
     const fontSize = useAppConfig("lyric.fontSize");
     const enableAutoSearchLyric = useAppConfig("lyric.autoSearchLyric");
-
-
+    const desktopLineCount = useAppConfig("lyric.desktopLineCount");
+    const resetDesktopLyricOnStartup = useAppConfig(
+        "lyric.resetDesktopLyricOnStartup",
+    );
 
     const colors = useColors();
 
@@ -799,12 +802,14 @@ function LyricSetting() {
                             backgroundColor: Config.getConfig("lyric.backgroundColor"),
                             widthPercent: Config.getConfig("lyric.widthPercent"),
                             fontSize: Config.getConfig("lyric.fontSize"),
+                            maxLines: Config.getConfig("lyric.desktopLineCount") ?? 1,
                         };
                         LyricUtil.showStatusBarLyric(
                             "MusicFree",
                             statusBarLyricConfig ?? {}
                         );
                         Config.setConfig("lyric.showStatusBarLyric", true);
+                        lyricManager.refreshDesktopLyricOverlay();
                     } else {
                         LyricUtil.requestSystemAlertPermission().finally(() => {
                             Toast.warn(t("toast.noFloatWindowPermission"));
@@ -839,6 +844,29 @@ function LyricSetting() {
         },
     );
 
+    const desktopLineCountRadio = createRadio(
+        t("basicSettings.lyric.desktopLineCount"),
+        "lyric.desktopLineCount",
+        [1, 2, 3],
+        desktopLineCount ?? 1,
+        {
+            1: t("basicSettings.lyric.desktopLineCount.one"),
+            2: t("basicSettings.lyric.desktopLineCount.two"),
+            3: t("basicSettings.lyric.desktopLineCount.three"),
+        },
+        () => {
+            if (showStatusBarLyric) {
+                lyricManager.refreshDesktopLyricOverlay();
+            }
+        },
+    );
+
+    const resetDesktopLyricOnStartupSwitch = createSwitch(
+        t("basicSettings.lyric.resetDesktopLyricOnStartup"),
+        "lyric.resetDesktopLyricOnStartup",
+        resetDesktopLyricOnStartup ?? false,
+    );
+
     return (
         <View>
             <ListItem
@@ -854,6 +882,25 @@ function LyricSetting() {
                 onPress={openStatusBarLyric.onPress}>
                 <ListItem.Content title={openStatusBarLyric.title} />
                 {openStatusBarLyric.right}
+            </ListItem>
+            <ListItem
+                withHorizontalPadding
+                heightType="small"
+                onPress={desktopLineCountRadio.onPress}>
+                <ListItem.Content title={desktopLineCountRadio.title} />
+                {desktopLineCountRadio.right}
+            </ListItem>
+            <ListItem
+                withHorizontalPadding
+                heightType="small"
+                onPress={resetDesktopLyricOnStartupSwitch.onPress}>
+                <ListItem.Content
+                    title={resetDesktopLyricOnStartupSwitch.title}
+                    description={t(
+                        "basicSettings.lyric.resetDesktopLyricOnStartup.description",
+                    )}
+                />
+                {resetDesktopLyricOnStartupSwitch.right}
             </ListItem>
             <View style={lyricStyles.sliderContainer}>
                 <ThemeText>{t("basicSettings.lyric.leftRightDistance")}</ThemeText>

@@ -14,6 +14,7 @@ import android.view.MotionEvent
 import android.view.OrientationEventListener
 import android.view.View
 import android.view.WindowManager
+import android.text.TextUtils
 import android.widget.TextView
 import com.facebook.react.bridge.ReactContext
 
@@ -71,6 +72,7 @@ class LyricView(private val reactContext: ReactContext) : Activity(), View.OnTou
                 val backgroundColor = options["backgroundColor"]
                 val widthPercent = options["widthPercent"]
                 val fontSize = options["fontSize"]
+                val maxLines = options["maxLines"]?.toString()?.toInt()?.coerceIn(1, 4) ?: 1
 
                 this.widthPercent = widthPercent?.toString()?.toDouble() ?: 0.5
 
@@ -97,6 +99,8 @@ class LyricView(private val reactContext: ReactContext) : Activity(), View.OnTou
                     setTextColor(Color.parseColor(rgba2argb(color?.toString() ?: "#FFE9D2")))
                     setPadding(12, 6, 12, 6)
                     gravity = align?.toString()?.toInt() ?: Gravity.CENTER
+                    this.maxLines = maxLines
+                    ellipsize = TextUtils.TruncateAt.END
                 }
                 windowManager?.addView(tv, layoutParams)
 
@@ -218,5 +222,12 @@ class LyricView(private val reactContext: ReactContext) : Activity(), View.OnTou
 
     fun setFontSize(fontSize: Float) {
         tv?.textSize = fontSize
+    }
+
+    fun setMaxLines(maxLines: Int) {
+        tv?.let {
+            it.maxLines = maxLines.coerceIn(1, 4)
+            it.ellipsize = TextUtils.TruncateAt.END
+        }
     }
 }

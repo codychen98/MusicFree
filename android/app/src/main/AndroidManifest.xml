@@ -163,5 +163,14 @@
               <data android:pathPattern=".*\\.JS" />
           </intent-filter>
       </activity>
+      <receiver
+          android:name=".MusicFreeControlReceiver"
+          android:exported="true">
+          <intent-filter>
+              <action android:name="fun.upup.musicfree.action.CAR" />
+              <action android:name="fun.upup.musicfree.action.NEXT" />
+              <action android:name="fun.upup.musicfree.action.PREV" />
+          </intent-filter>
+      </receiver>
     </application>
 </manifest>

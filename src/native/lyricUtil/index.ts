@@ -23,6 +23,8 @@ interface ILyricUtil extends NativeModule {
     hideStatusBarLyric: () => Promise<void>;
     /** 设置歌词文本 */
     setStatusBarLyricText: (lyric: string) => Promise<void>;
+    /** 设置桌面歌词最大行数 */
+    setStatusBarLyricMaxLines: (maxLines: number) => Promise<void>;
     /** 设置距离顶部的距离 */
     setStatusBarLyricTop: (percent: number) => Promise<void>;
     /** 设置距离左部的距离 */

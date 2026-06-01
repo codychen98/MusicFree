@@ -171,6 +171,16 @@ class AppConfig implements IAppConfig {
             }
             configStore.set("$schema", "3");
         }
+
+        if (schemaVersion < 4) {
+            if (this.getConfig("lyric.desktopLineCount") === undefined) {
+                this.setConfig("lyric.desktopLineCount", 1);
+            }
+            if (this.getConfig("lyric.resetDesktopLyricOnStartup") === undefined) {
+                this.setConfig("lyric.resetDesktopLyricOnStartup", false);
+            }
+            configStore.set("$schema", "4");
+        }
     }
 
     async setup(): Promise<void> {

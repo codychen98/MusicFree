@@ -9,6 +9,7 @@ import { atom, getDefaultStore, useAtomValue } from "jotai";
 import { Plugin } from "./pluginManager";
 
 import pathConst from "@/constants/pathConst";
+import { buildDesktopLyricText } from "@/core/lyric/buildDesktopLyricText";
 import LyricUtil from "@/native/lyricUtil";
 import { checkAndCreateDir } from "@/utils/fileUtils";
 import PersistStatus from "@/utils/persistStatus";
@@ -67,6 +68,72 @@ class LyricManager implements IInjectable {
         this.pluginManager = pluginManager;
     }
 
+    /** Rebuild overlay text from current lyric state (e.g. after line-count setting change). */
+    refreshDesktopLyricOverlay() {
+        this.updateStatusBarLyricOverlay(
+            getDefaultStore().get(currentLyricItemAtom),
+            this.lyricState.lyrics,
+        );
+    }
+
+    getDesktopLyricOverlayOptions() {
+        return this.getStatusBarLyricConfig();
+    }
+
+    private getStatusBarLyricConfig() {
+        const lineCount = this.appConfig.getConfig("lyric.desktopLineCount") ?? 1;
+        return {
+            topPercent: this.appConfig.getConfig("lyric.topPercent"),
+            leftPercent: this.appConfig.getConfig("lyric.leftPercent"),
+            align: this.appConfig.getConfig("lyric.align"),
+            color: this.appConfig.getConfig("lyric.color"),
+            backgroundColor: this.appConfig.getConfig("lyric.backgroundColor"),
+            widthPercent: this.appConfig.getConfig("lyric.widthPercent"),
+            fontSize: this.appConfig.getConfig("lyric.fontSize"),
+            maxLines: lineCount,
+        };
+    }
+
+    private updateStatusBarLyricOverlay(
+        currentItem: IParsedLrcItem | null,
+        lyrics: readonly IParsedLrcItem[] = this.lyricState.lyrics,
+    ) {
+        if (!this.appConfig.getConfig("lyric.showStatusBarLyric")) {
+            return;
+        }
+
+        const lineCount = this.appConfig.getConfig("lyric.desktopLineCount") ?? 1;
+        const showTranslation = PersistStatus.get("lyric.showTranslation");
+        const hasSyncedLyrics = lyrics.length > 0 && currentItem != null;
+
+        let text: string;
+        let maxLines = lineCount;
+
+        if (!hasSyncedLyrics) {
+            const musicItem = this.trackPlayer.currentMusic;
+            text = musicItem
+                ? `${musicItem.title} - ${musicItem.artist}`
+                : "MusicFree";
+            maxLines = 1;
+        } else {
+            text = buildDesktopLyricText({
+                lyrics,
+                current: currentItem,
+                lineCount,
+                showTranslation: !!showTranslation,
+            });
+            if (
+                showTranslation &&
+                currentItem?.translation?.trim()
+            ) {
+                maxLines = lineCount + 1;
+            }
+        }
+
+        LyricUtil.setStatusBarLyricMaxLines(maxLines);
+        LyricUtil.setStatusBarLyricText(text);
+    }
+
     setup() {
         // 更新歌词
         this.trackPlayer.on(TrackPlayerEvents.CurrentMusicChanged, (musicItem) => {
@@ -74,12 +141,7 @@ class LyricManager implements IInjectable {
             this.refreshLyric(!forceRefetch, true);
 
             if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
-                if (musicItem) {
-                    LyricUtil.setStatusBarLyricText(
-                        `${musicItem.title} - ${musicItem.artist}`,);
-                } else {
-                    LyricUtil.setStatusBarLyricText("MusicFree");
-                }
+                this.updateStatusBarLyricOverlay(null, []);
             }
         });
 
@@ -97,15 +159,10 @@ class LyricManager implements IInjectable {
                 // 更新当前歌词状态
                 getDefaultStore().set(currentLyricItemAtom, newLyricItem ?? null);
 
-                // 更新状态栏歌词
-                const showTranslation = PersistStatus.get("lyric.showTranslation");
-
                 if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
-                    LyricUtil.setStatusBarLyricText(
-                        (newLyricItem?.lrc ?? "") +
-                        (showTranslation
-                            ? `\n${newLyricItem?.translation ?? ""}`
-                            : ""),
+                    this.updateStatusBarLyricOverlay(
+                        newLyricItem ?? null,
+                        this.lyricState.lyrics,
                     );
                 }
             }
@@ -113,18 +170,9 @@ class LyricManager implements IInjectable {
 
 
         if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
-            const statusBarLyricConfig = {
-                topPercent: this.appConfig.getConfig("lyric.topPercent"),
-                leftPercent: this.appConfig.getConfig("lyric.leftPercent"),
-                align: this.appConfig.getConfig("lyric.align"),
-                color: this.appConfig.getConfig("lyric.color"),
-                backgroundColor: this.appConfig.getConfig("lyric.backgroundColor"),
-                widthPercent: this.appConfig.getConfig("lyric.widthPercent"),
-                fontSize: this.appConfig.getConfig("lyric.fontSize"),
-            };
             LyricUtil.showStatusBarLyric(
                 "MusicFree",
-                statusBarLyricConfig ?? {}
+                this.getStatusBarLyricConfig(),
             );
         }
 
@@ -259,8 +307,7 @@ class LyricManager implements IInjectable {
         });
         getDefaultStore().set(currentLyricItemAtom, null);
         if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
-            const musicItem = this.trackPlayer.currentMusic;
-            LyricUtil.setStatusBarLyricText(musicItem ? `${musicItem.title} - ${musicItem.artist}` : "MusicFree");
+            this.updateStatusBarLyricOverlay(null, []);
         }
     }
 
@@ -376,17 +423,10 @@ class LyricManager implements IInjectable {
             getDefaultStore().set(currentLyricItemAtom, currentLyric || null);
 
             if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
-                if (currentLyric) {
-                    LyricUtil.setStatusBarLyricText(
-                        (currentLyric?.lrc ?? "") +
-                        (this.lyricParser.hasTranslation
-                            ? `\n${currentLyric?.translation ?? ""}`
-                            : ""),
-                    );
-                } else {
-                    const musicItem = this.trackPlayer.currentMusic;
-                    LyricUtil.setStatusBarLyricText(musicItem ? `${musicItem.title} - ${musicItem.artist}` : "MusicFree");
-                }
+                this.updateStatusBarLyricOverlay(
+                    currentLyric || null,
+                    this.lyricParser.getLyricItems(),
+                );
             }
 
             committed = true;

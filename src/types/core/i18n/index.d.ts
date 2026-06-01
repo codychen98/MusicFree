@@ -365,6 +365,12 @@ export interface ILanguageData {
     "basicSettings.lyric.fontSize": string; // 字体大小
     "basicSettings.lyric.textColor": string; // 文本颜色
     "basicSettings.lyric.backgroundColor": string; // 文本背景色
+    "basicSettings.lyric.desktopLineCount": string; // 桌面歌词行数
+    "basicSettings.lyric.desktopLineCount.one": string; // 1 行
+    "basicSettings.lyric.desktopLineCount.two": string; // 2 行
+    "basicSettings.lyric.desktopLineCount.three": string; // 3 行
+    "basicSettings.lyric.resetDesktopLyricOnStartup": string; // 冷启动时关闭桌面歌词
+    "basicSettings.lyric.resetDesktopLyricOnStartup.description": string; // 冷启动说明
     
     "basicSettings.cache": string; // 缓存
     "basicSettings.cache.musicCacheLimit": string; // 音乐缓存上限
@@ -404,6 +410,8 @@ export interface ILanguageData {
     "toast.imageCacheCleared": string; // 已清除图片缓存
     "toast.logCleared": string; // 日志已清空
     "toast.noFloatWindowPermission": string; // 无悬浮窗权限
+    "toast.carMode.emptyFavorites": string; // 收藏夹为空
+    "toast.carMode.overlayPermissionDenied": string; // 桌面歌词无悬浮窗权限
     "toast.folderNotExistOrNoPermission": string; // 文件夹不存在或无权限
     
     // 音质相关

@@ -7,8 +7,10 @@ import android.app.Application
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
+import com.facebook.react.ReactInstanceEventListener
 import com.facebook.react.ReactNativeHost
 import com.facebook.react.ReactPackage
+import com.facebook.react.bridge.ReactContext
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
@@ -19,6 +21,8 @@ import `fun`.upup.musicfree.mp3Util.Mp3UtilPackage
 import `fun`.upup.musicfree.utils.UtilsPackage
 
 class MainApplication : Application(), ReactApplication {
+
+  private var controlContextListener: ReactInstanceEventListener? = null
 
   override val reactNativeHost: ReactNativeHost =
       ReactNativeHostWrapper(this, object : DefaultReactNativeHost(this) {
@@ -55,5 +59,30 @@ class MainApplication : Application(), ReactApplication {
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
     ApplicationLifecycleDispatcher.onConfigurationChanged(this, newConfig)
+  }
+
+  /**
+   * Loads the React instance without starting MainActivity (MacroDroid car/next/prev).
+   * v1: first use after reboot may require the JS bundle to finish bootstrap before controls work.
+   */
+  fun ensureReactContextForControl() {
+    val manager = reactNativeHost.reactInstanceManager
+    val existing: ReactContext? = manager.currentReactContext
+    if (existing != null) {
+      MusicFreeControlPendingQueue.flush(existing)
+      return
+    }
+    if (controlContextListener == null) {
+      val listener = ReactInstanceEventListener { context: ReactContext ->
+        MusicFreeControlPendingQueue.flush(context)
+        manager.removeReactInstanceEventListener(listener)
+        controlContextListener = null
+      }
+      controlContextListener = listener
+      manager.addReactInstanceEventListener(listener)
+    }
+    if (!manager.hasStartedCreatingInitialContext()) {
+      manager.createReactContextInBackground()
+    }
   }
 }
