@@ -73,10 +73,12 @@ class MainApplication : Application(), ReactApplication {
       return
     }
     if (controlContextListener == null) {
-      val listener = ReactInstanceEventListener { context: ReactContext ->
-        MusicFreeControlPendingQueue.flush(context)
-        manager.removeReactInstanceEventListener(listener)
-        controlContextListener = null
+      val listener = object : ReactInstanceEventListener {
+        override fun onReactContextInitialized(context: ReactContext) {
+          MusicFreeControlPendingQueue.flush(context)
+          manager.removeReactInstanceEventListener(this)
+          controlContextListener = null
+        }
       }
       controlContextListener = listener
       manager.addReactInstanceEventListener(listener)
