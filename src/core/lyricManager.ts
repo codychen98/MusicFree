@@ -136,9 +136,10 @@ class LyricManager implements IInjectable {
 
     setup() {
         // 更新歌词
-        this.trackPlayer.on(TrackPlayerEvents.CurrentMusicChanged, (musicItem) => {
-            const forceRefetch = this.lyricState.loading;
-            this.refreshLyric(!forceRefetch, true);
+        this.trackPlayer.on(TrackPlayerEvents.CurrentMusicChanged, () => {
+            // Always refetch on track change so stale lyrics/parser from a prior song
+            // cannot remain when overlapping refreshLyric calls abort mid-flight.
+            this.refreshLyric(false, true);
 
             if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
                 this.updateStatusBarLyricOverlay(null, []);
@@ -155,7 +156,10 @@ class LyricManager implements IInjectable {
             const newLyricItem = parser.getPosition(evt.position);
 
 
-            if (currentLyricItem?.lrc !== newLyricItem?.lrc) {
+            if (
+                currentLyricItem?.index !== newLyricItem?.index ||
+                currentLyricItem?.lrc !== newLyricItem?.lrc
+            ) {
                 // 更新当前歌词状态
                 getDefaultStore().set(currentLyricItemAtom, newLyricItem ?? null);
 
@@ -286,6 +290,24 @@ class LyricManager implements IInjectable {
         this.refreshLyric(false, false);
     }
 
+    /**
+     * True when lyrics are shown for a track but the in-memory parser is missing or
+     * bound to another track (progress events will not advance the highlight).
+     */
+    isLyricDisplayStale(): boolean {
+        const currentMusic = this.trackPlayer.currentMusic;
+        if (!currentMusic || this.lyricState.loading) {
+            return false;
+        }
+        if (this.lyricState.lyrics.length === 0) {
+            return false;
+        }
+        return (
+            !this.lyricParser ||
+            !this.trackPlayer.isCurrentMusic(this.lyricParser.musicItem)
+        );
+    }
+
     private isActiveLyricRefresh(generation: number): boolean {
         return generation === this.lyricRefreshGeneration;
     }
@@ -336,6 +358,23 @@ class LyricManager implements IInjectable {
         );
     }
 
+    /** Drop lyrics/parser that belong to a different track before a new fetch starts. */
+    private clearStaleLyricStateForTrack(
+        currentMusicItem: IMusic.IMusicItem,
+        generation: number,
+    ) {
+        if (!this.isActiveLyricRefresh(generation)) {
+            return;
+        }
+        const parserMatchesCurrent =
+            this.lyricParser &&
+            this.trackPlayer.isCurrentMusic(this.lyricParser.musicItem);
+        if (!parserMatchesCurrent) {
+            this.lyricParser = null;
+            this.setLyricAsLoadingState();
+        }
+    }
+
     private async refreshLyric(skipFetchLyricSourceIfSame: boolean = true, ignoreProgress: boolean = false) {
         const generation = ++this.lyricRefreshGeneration;
         const currentMusicItem = this.trackPlayer.currentMusic;
@@ -348,6 +387,8 @@ class LyricManager implements IInjectable {
             }
             return;
         }
+
+        this.clearStaleLyricStateForTrack(currentMusicItem, generation);
 
         let committed = false;
 

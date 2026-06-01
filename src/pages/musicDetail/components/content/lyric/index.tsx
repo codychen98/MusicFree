@@ -163,25 +163,30 @@ export default function Lyric(props: IProps) {
         };
     }, []);
 
-    // Recover from orphaned loading state (no in-flight refresh) without force-close.
+    // Recover from orphaned loading or frozen lyrics (parser out of sync with UI).
     useEffect(() => {
-        if (!loading || !currentMusicItem) {
+        if (!currentMusicItem) {
             return;
         }
         const trackKey = `${currentMusicItem.platform}@${currentMusicItem.id}`;
         const timer = setTimeout(() => {
             const playing = TrackPlayer.currentMusic;
             if (
-                !lyricManager.lyricState.loading ||
                 !playing ||
                 `${playing.platform}@${playing.id}` !== trackKey
             ) {
                 return;
             }
+            const stillStuck =
+                lyricManager.lyricState.loading ||
+                lyricManager.isLyricDisplayStale();
+            if (!stillStuck) {
+                return;
+            }
             lyricManager.retryCurrentLyric();
         }, LYRIC_UI_STUCK_RETRY_MS);
         return () => clearTimeout(timer);
-    }, [loading, currentMusicItem?.id, currentMusicItem?.platform]);
+    }, [loading, lyrics.length, currentMusicItem?.id, currentMusicItem?.platform]);
 
     // 开始滚动时拖拽生效
     const onScrollBeginDrag = () => {
