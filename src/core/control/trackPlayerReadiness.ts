@@ -1,5 +1,7 @@
-let readyPromise: Promise<void> = Promise.resolve();
 let readyResolve: (() => void) | null = null;
+let readyPromise: Promise<void> = new Promise<void>(resolve => {
+    readyResolve = resolve;
+});
 
 export function beginTrackPlayerInit(): void {
     readyPromise = new Promise<void>(resolve => {

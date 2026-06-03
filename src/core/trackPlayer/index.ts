@@ -119,6 +119,42 @@ class TrackPlayer extends EventEmitter<{
         return getDefaultStore().get(currentMusicAtom);
     }
 
+    /** For headless controls when the atom is unset but RNTP is still playing. */
+    public async resolveCurrentMusicItem(): Promise<IMusic.IMusicItem | null> {
+        const fromAtom = this.currentMusic;
+        if (fromAtom) {
+            return fromAtom;
+        }
+
+        const persisted = PersistStatus.get("music.musicItem");
+        if (persisted?.id != null && persisted.platform != null) {
+            if (this.isInPlayList(persisted)) {
+                return persisted;
+            }
+            const fromPersistedList = this.playList.find(it =>
+                isSameMediaItem(it, persisted),
+            );
+            if (fromPersistedList) {
+                return fromPersistedList;
+            }
+            return persisted;
+        }
+
+        const activeTrack = await ReactNativeTrackPlayer.getActiveTrack();
+        if (!activeTrack?.id || activeTrack.platform == null) {
+            return null;
+        }
+
+        const fromPlayList = this.playList.find(it =>
+            isSameMediaItem(it, activeTrack as IMusic.IMusicItem),
+        );
+        if (fromPlayList) {
+            return fromPlayList;
+        }
+
+        return activeTrack as IMusic.IMusicItem;
+    }
+
     public get nextMusic() {
         const currentMusic = this.currentMusic;
         if (!currentMusic) {

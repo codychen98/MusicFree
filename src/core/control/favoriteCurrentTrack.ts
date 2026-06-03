@@ -2,7 +2,7 @@ import MusicSheet from "@/core/musicSheet";
 import TrackPlayer from "@/core/trackPlayer";
 
 export async function favoriteCurrentTrack(): Promise<void> {
-    const musicItem = TrackPlayer.currentMusic;
+    const musicItem = await TrackPlayer.resolveCurrentMusicItem();
     if (!musicItem) {
         return;
     }

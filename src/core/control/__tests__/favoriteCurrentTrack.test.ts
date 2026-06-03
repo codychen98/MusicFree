@@ -1,7 +1,7 @@
 jest.mock("@/core/trackPlayer", () => ({
     __esModule: true,
     default: {
-        currentMusic: null as IMusic.IMusicItem | null,
+        resolveCurrentMusicItem: jest.fn(() => Promise.resolve(null)),
     },
 }));
 
@@ -31,10 +31,15 @@ const track = {
     title: "Song",
 } as IMusic.IMusicItem;
 
+const mockedResolveCurrent =
+    TrackPlayer.resolveCurrentMusicItem as jest.MockedFunction<
+        typeof TrackPlayer.resolveCurrentMusicItem
+    >;
+
 describe("favoriteCurrentTrack", () => {
     beforeEach(() => {
         jest.clearAllMocks();
-        TrackPlayer.currentMusic = null;
+        mockedResolveCurrent.mockResolvedValue(null);
         mockedGetList.mockReturnValue({
             has: jest.fn(() => false),
         } as ReturnType<typeof MusicSheet.getSortedMusicListBySheetId>);
@@ -47,7 +52,7 @@ describe("favoriteCurrentTrack", () => {
     });
 
     it("does nothing when the track is already favorited", async () => {
-        TrackPlayer.currentMusic = track;
+        mockedResolveCurrent.mockResolvedValue(track);
         mockedGetList.mockReturnValue({
             has: jest.fn(() => true),
         } as ReturnType<typeof MusicSheet.getSortedMusicListBySheetId>);
@@ -59,7 +64,7 @@ describe("favoriteCurrentTrack", () => {
     });
 
     it("adds the current track when it is not favorited", async () => {
-        TrackPlayer.currentMusic = track;
+        mockedResolveCurrent.mockResolvedValue(track);
         const has = jest.fn(() => false);
         mockedGetList.mockReturnValue({
             has,
