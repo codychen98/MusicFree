@@ -6,6 +6,10 @@ jest.mock("@/core/control/carMode", () => ({
     runCarMode: jest.fn(() => Promise.resolve()),
 }));
 
+jest.mock("@/core/control/favoriteCurrentTrack", () => ({
+    favoriteCurrentTrack: jest.fn(() => Promise.resolve()),
+}));
+
 jest.mock("@/core/trackPlayer", () => ({
     __esModule: true,
     default: {
@@ -16,6 +20,7 @@ jest.mock("@/core/trackPlayer", () => ({
 
 import TrackPlayer from "@/core/trackPlayer";
 import { runCarMode } from "@/core/control/carMode";
+import { favoriteCurrentTrack } from "@/core/control/favoriteCurrentTrack";
 import { handleMusicFreeControl } from "../handleMusicFreeControl";
 import { waitForTrackPlayerReady } from "@/core/control/trackPlayerReadiness";
 
@@ -26,6 +31,8 @@ const mockedSkipPrev = TrackPlayer.skipToPrevious as jest.MockedFunction<
     typeof TrackPlayer.skipToPrevious
 >;
 const mockedRunCarMode = runCarMode as jest.MockedFunction<typeof runCarMode>;
+const mockedFavoriteCurrentTrack =
+    favoriteCurrentTrack as jest.MockedFunction<typeof favoriteCurrentTrack>;
 const mockedWaitReady = waitForTrackPlayerReady as jest.MockedFunction<
     typeof waitForTrackPlayerReady
 >;
@@ -57,6 +64,15 @@ describe("handleMusicFreeControl", () => {
     it("dispatches car to runCarMode", async () => {
         await handleMusicFreeControl("car");
         expect(mockedRunCarMode).toHaveBeenCalledTimes(1);
+        expect(mockedSkipNext).not.toHaveBeenCalled();
+        expect(mockedSkipPrev).not.toHaveBeenCalled();
+        expect(mockedFavoriteCurrentTrack).not.toHaveBeenCalled();
+    });
+
+    it("dispatches favorite to favoriteCurrentTrack", async () => {
+        await handleMusicFreeControl("favorite");
+        expect(mockedFavoriteCurrentTrack).toHaveBeenCalledTimes(1);
+        expect(mockedRunCarMode).not.toHaveBeenCalled();
         expect(mockedSkipNext).not.toHaveBeenCalled();
         expect(mockedSkipPrev).not.toHaveBeenCalled();
     });

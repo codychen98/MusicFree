@@ -26,9 +26,9 @@ Package name (always use this in macros): `fun.upup.musicfree`
 
 ## Important: no app window
 
-**Car, Next, and Prev do not launch MainActivity.** MusicFree should not pop to the foreground. If you see the app open, check that the macro uses **Send Intent** as a **broadcast** (not `ACTION_VIEW` / deep link).
+**Car, Next, Prev, and Favorite do not launch MainActivity.** MusicFree should not pop to the foreground. If you see the app open, check that the macro uses **Send Intent** as a **broadcast** (not `ACTION_VIEW` / deep link).
 
-Do **not** use `musicfree://app/...` for these three actions.
+Do **not** use `musicfree://app/...` for these broadcast actions.
 
 ---
 
@@ -39,6 +39,7 @@ Do **not** use `musicfree://app/...` for these three actions.
 | Car (favorites + desktop lyrics) | `fun.upup.musicfree.action.CAR` |
 | Next track | `fun.upup.musicfree.action.NEXT` |
 | Previous track | `fun.upup.musicfree.action.PREV` |
+| Favorite now playing (add-only) | `fun.upup.musicfree.action.FAVORITE` |
 
 **Car mode behavior**
 
@@ -51,6 +52,12 @@ Do **not** use `musicfree://app/...` for these three actions.
 
 - Skips in the current queue. Empty queue → no crash, no-op.
 
+**Favorite**
+
+- Adds the **currently playing** track to Favorites (`我喜欢`).
+- Already in Favorites → no-op (does not remove).
+- Nothing playing → no-op, no toast.
+
 ---
 
 ## MacroDroid setup (Send Intent)
@@ -59,11 +66,11 @@ For each macro, add an action: **Applications → Send Intent**.
 
 Use these fields (names may vary slightly by MacroDroid version):
 
-| Field | Car | Next | Prev |
-|-------|-----|------|------|
-| **Intent action** | `fun.upup.musicfree.action.CAR` | `fun.upup.musicfree.action.NEXT` | `fun.upup.musicfree.action.PREV` |
-| **Package** | `fun.upup.musicfree` | `fun.upup.musicfree` | `fun.upup.musicfree` |
-| **Target** | **Broadcast** | **Broadcast** | **Broadcast** |
+| Field | Car | Next | Prev | Favorite |
+|-------|-----|------|------|----------|
+| **Intent action** | `fun.upup.musicfree.action.CAR` | `fun.upup.musicfree.action.NEXT` | `fun.upup.musicfree.action.PREV` | `fun.upup.musicfree.action.FAVORITE` |
+| **Package** | `fun.upup.musicfree` | `fun.upup.musicfree` | `fun.upup.musicfree` | `fun.upup.musicfree` |
+| **Target** | **Broadcast** | **Broadcast** | **Broadcast** | **Broadcast** |
 
 Leave data URI / class name empty unless your MacroDroid build requires extra fields; action + package + broadcast is enough.
 
@@ -77,6 +84,7 @@ Leave data URI / class name empty unless your MacroDroid build requires extra fi
 am broadcast -a fun.upup.musicfree.action.CAR -p fun.upup.musicfree
 am broadcast -a fun.upup.musicfree.action.NEXT -p fun.upup.musicfree
 am broadcast -a fun.upup.musicfree.action.PREV -p fun.upup.musicfree
+am broadcast -a fun.upup.musicfree.action.FAVORITE -p fun.upup.musicfree
 ```
 
 In MacroDroid: **Actions → Device Actions → ADB Shell Command** (or “Execute Shell Script”), paste one line per macro.
@@ -105,6 +113,7 @@ Car mode turns desktop lyrics **on** for the session when overlay permission is 
 | **Car plays but no lyrics** | Overlay permission not granted; enable desktop lyrics in settings and allow “display over other apps”. |
 | **“Empty favorites” toast** | Add songs to Favorites in MusicFree. |
 | **Next/Prev no effect** | Nothing in the play queue; start playback (e.g. run car macro) first. |
+| **Favorite does nothing** | Nothing is playing, or the track is already in Favorites (add-only; no toast). |
 | **MusicFree UI opens** | Macro must be **broadcast**, not VIEW/deep link; action and package must match the table above. |
 | **Works once, then stops after reboot** | Cold-start bootstrap (v1): launch MusicFree once after reboot, or retry car macro after ~10 s. |
 | **Overlay gone after restarting phone** | Expected if **Reset desktop lyrics on cold start** is enabled. Run car macro again or re-enable desktop lyrics. |
@@ -117,12 +126,13 @@ Car mode turns desktop lyrics **on** for the session when overlay permission is 
 2. Open Maps (or stay on home screen).
 3. Run **CAR** macro → music plays, overlay visible, MusicFree UI does **not** open.
 4. Run **NEXT** / **PREV** → track changes, still no UI.
-5. Deny overlay (or revoke permission), run **CAR** → music plays, toast about overlay, no floating window.
+5. Run **FAVORITE** while a non-favorited track plays → song appears in Favorites; run again → still no UI, no unfavorite.
+6. Deny overlay (or revoke permission), run **CAR** → music plays, toast about overlay, no floating window.
 
 ---
 
 ## Technical reference
 
 - Android receiver: `MusicFreeControlReceiver` (`exported="true"`).
-- JS event: `MusicFreeControl` with payload `{ action: "car" | "next" | "prev" }`.
+- JS event: `MusicFreeControl` with payload `{ action: "car" | "next" | "prev" | "favorite" }`.
 - Implementation roadmap: `roadmap/car_mode_desktop_lyrics_implementation.md`.

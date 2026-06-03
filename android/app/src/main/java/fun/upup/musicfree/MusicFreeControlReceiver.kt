@@ -23,6 +23,7 @@ class MusicFreeControlReceiver : BroadcastReceiver() {
             ACTION_CAR -> "car"
             ACTION_NEXT -> "next"
             ACTION_PREV -> "prev"
+            ACTION_FAVORITE -> "favorite"
             else -> null
         }
     }
@@ -31,5 +32,6 @@ class MusicFreeControlReceiver : BroadcastReceiver() {
         const val ACTION_CAR = "fun.upup.musicfree.action.CAR"
         const val ACTION_NEXT = "fun.upup.musicfree.action.NEXT"
         const val ACTION_PREV = "fun.upup.musicfree.action.PREV"
+        const val ACTION_FAVORITE = "fun.upup.musicfree.action.FAVORITE"
     }
 }

@@ -170,6 +170,7 @@
               <action android:name="fun.upup.musicfree.action.CAR" />
               <action android:name="fun.upup.musicfree.action.NEXT" />
               <action android:name="fun.upup.musicfree.action.PREV" />
+              <action android:name="fun.upup.musicfree.action.FAVORITE" />
           </intent-filter>
       </receiver>
     </application>
