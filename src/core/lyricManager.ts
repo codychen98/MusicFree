@@ -55,6 +55,13 @@ class LyricManager implements IInjectable {
     /** Monotonic id; only the latest refreshLyric call may commit lyric state. */
     private lyricRefreshGeneration = 0;
 
+    /**
+     * True while a refreshLyric fetch is actively running (plugin getLyric and/or
+     * auto-search). The recovery watchdog must NOT retry while this is true, otherwise
+     * it bumps the generation token and aborts the very fetch that would populate lyrics.
+     */
+    private refreshInFlight = false;
+
     /** Background/desktop recovery: detect stuck state without the lyrics tab mounted. */
     private lyricRecoveryTrackKey: string | null = null;
     private lyricRecoveryStuckSince: number | null = null;
@@ -154,30 +161,12 @@ class LyricManager implements IInjectable {
             }
         });
 
+        // Single progress entry point: resync the active line/overlay from the playback
+        // position and, only when genuinely stuck, retry. This listener also fires while
+        // the app is backgrounded (the playback service keeps this JS context alive), so
+        // desktop lyrics recover here too without a separate service hook.
         RNTrackPlayer.addEventListener(Event.PlaybackProgressUpdated, evt => {
             this.tickLyricRecoveryWatchdog(evt.position);
-
-            const parser = this.lyricParser;
-            if (!parser || !this.trackPlayer.isCurrentMusic(parser.musicItem)) {
-                return;
-            }
-
-            const currentLyricItem = getDefaultStore().get(currentLyricItemAtom);
-            const newLyricItem = parser.getPosition(evt.position);
-
-            if (
-                currentLyricItem?.index !== newLyricItem?.index ||
-                currentLyricItem?.lrc !== newLyricItem?.lrc
-            ) {
-                getDefaultStore().set(currentLyricItemAtom, newLyricItem ?? null);
-
-                if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
-                    this.updateStatusBarLyricOverlay(
-                        newLyricItem ?? null,
-                        this.lyricState.lyrics,
-                    );
-                }
-            }
         });
 
         AppState.addEventListener("change", nextState => {
@@ -310,6 +299,12 @@ class LyricManager implements IInjectable {
 
     needsLyricRecovery(): boolean {
         if (!this.trackPlayer.currentMusic) {
+            return false;
+        }
+        // A fetch in progress is NOT stuck; retrying would abort it via the generation
+        // token and loop forever. Only orphaned loading (no live fetch) or a drifted
+        // parser is recoverable.
+        if (this.refreshInFlight) {
             return false;
         }
         return this.lyricState.loading || this.isLyricDisplayStale();
@@ -498,6 +493,7 @@ class LyricManager implements IInjectable {
         this.clearStaleLyricStateForTrack(currentMusicItem, generation);
 
         let committed = false;
+        this.refreshInFlight = true;
 
         try {
             let lrcSource: ILyric.ILyricSource | null;
@@ -585,13 +581,14 @@ class LyricManager implements IInjectable {
                 committed = true;
             }
         } finally {
-            if (
-                this.isActiveLyricRefresh(generation) &&
-                !committed &&
-                this.trackPlayer.isCurrentMusic(currentMusicItem)
-            ) {
-                this.lyricParser = null;
-                this.setLyricAsNoLyricState();
+            // Only the active (latest) refresh owns the in-flight flag and the orphan
+            // cleanup; a superseded refresh must leave both to the newer one still running.
+            if (this.isActiveLyricRefresh(generation)) {
+                this.refreshInFlight = false;
+                if (!committed && this.trackPlayer.isCurrentMusic(currentMusicItem)) {
+                    this.lyricParser = null;
+                    this.setLyricAsNoLyricState();
+                }
             }
         }
     }
