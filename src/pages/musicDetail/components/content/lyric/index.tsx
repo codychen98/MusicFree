@@ -19,6 +19,7 @@ import { IconButtonWithGesture } from "@/components/base/iconButton.tsx";
 import { getMediaExtraProperty } from "@/utils/mediaExtra";
 import lyricManager, { useCurrentLyricItem, useLyricState } from "@/core/lyricManager";
 import { useI18N } from "@/core/i18n";
+import { lyricLog } from "@/utils/log";
 
 const ITEM_HEIGHT = rpx(92);
 
@@ -162,6 +163,21 @@ export default function Lyric(props: IProps) {
             isMountedRef.current = false;
         };
     }, []);
+
+    // [debug] observational only: report what the lyric tab actually renders so we can
+    // correlate the UI ("加载中..." / lyrics / no-lyric) with lyricManager state. No retry.
+    useEffect(() => {
+        lyricLog("ui:render", {
+            loading,
+            lyricsLen: lyrics.length,
+            currentTrack: currentMusicItem
+                ? `${currentMusicItem.platform}@${currentMusicItem.id}`
+                : null,
+            currentLrcIdx: currentLrcItem?.index ?? null,
+            mgrLoading: lyricManager.lyricState.loading,
+            mgrLyricsLen: lyricManager.lyricState.lyrics.length,
+        });
+    }, [loading, lyrics.length, currentMusicItem, currentLrcItem]);
 
     // Lyric recovery watchdog lives in lyricManager (progress + playback service), not here.
 

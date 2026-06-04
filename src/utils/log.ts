@@ -115,4 +115,19 @@ export function devLog(
     }
 }
 
+/**
+ * Temporary instrumentation for diagnosing stuck lyrics (in-app + desktop overlay).
+ * Routes to BOTH the persistent trace-log.log file (enable Settings -> Developer ->
+ * traceLog) and the in-app VDebug overlay (enable Settings -> Developer -> devLog), so
+ * the events can be captured on-device and exported. Remove once the root cause is found.
+ */
+export function lyricLog(event: string, data?: Record<string, any>) {
+    const payload = {
+        t: Date.now(),
+        ...(data ?? {}),
+    };
+    trace(`[LYRIC] ${event}`, payload);
+    devLog("log", `[LYRIC] ${event}`, payload);
+}
+
 export { log };

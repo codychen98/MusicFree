@@ -19,6 +19,7 @@ import { AppState } from "react-native";
 import RNTrackPlayer, { Event } from "react-native-track-player";
 import { TrackPlayerEvents } from "@/core.defination/trackPlayer";
 import { IPluginManager } from "@/types/core/pluginManager";
+import { lyricLog } from "@/utils/log";
 
 
 interface ILyricState {
@@ -67,6 +68,29 @@ class LyricManager implements IInjectable {
     private lyricRecoveryStuckSince: number | null = null;
     private lastLyricRecoveryRetryAt = 0;
     private static readonly LYRIC_RECOVERY_RETRY_COOLDOWN_MS = 3_000;
+
+    /** [debug] throttle for the per-second progress-tick state log. */
+    private lastTickLogAt = 0;
+
+    /** [debug] Compact identity of a music item for logs. */
+    private mkey(m?: IMusic.IMusicItem | null): string | null {
+        return m ? `${m.platform}@${m.id}` : null;
+    }
+
+    /** [debug] Snapshot of the manager's lyric state for logs. */
+    private lyricStateSnapshot() {
+        const parser = this.lyricParser;
+        return {
+            loading: this.lyricState.loading,
+            lyricsLen: this.lyricState.lyrics.length,
+            generation: this.lyricRefreshGeneration,
+            refreshInFlight: this.refreshInFlight,
+            parserTrack: this.mkey(parser?.musicItem ?? null),
+            currentTrack: this.mkey(this.trackPlayer.currentMusic),
+            appState: AppState.currentState,
+            showDesktop: !!this.appConfig.getConfig("lyric.showStatusBarLyric"),
+        };
+    }
 
     get currentLyricItem() {
         return getDefaultStore().get(currentLyricItemAtom);
@@ -144,13 +168,22 @@ class LyricManager implements IInjectable {
             }
         }
 
+        lyricLog("desktop:setText", {
+            hasSyncedLyrics,
+            maxLines,
+            textPreview: text.slice(0, 40),
+            currentItemIdx: currentItem?.index ?? null,
+            lyricsLen: lyrics.length,
+        });
         LyricUtil.setStatusBarLyricMaxLines(maxLines);
         LyricUtil.setStatusBarLyricText(text);
     }
 
     setup() {
+        lyricLog("setup", this.lyricStateSnapshot());
         // 更新歌词
         this.trackPlayer.on(TrackPlayerEvents.CurrentMusicChanged, () => {
+            lyricLog("event:CurrentMusicChanged", this.lyricStateSnapshot());
             this.resetLyricRecoveryWatchdog();
             // Always refetch on track change so stale lyrics/parser from a prior song
             // cannot remain when overlapping refreshLyric calls abort mid-flight.
@@ -166,15 +199,27 @@ class LyricManager implements IInjectable {
         // the app is backgrounded (the playback service keeps this JS context alive), so
         // desktop lyrics recover here too without a separate service hook.
         RNTrackPlayer.addEventListener(Event.PlaybackProgressUpdated, evt => {
+            // [debug] throttled tick log so we can see whether ticks fire (incl. background)
+            // and what the lyric state is while stuck.
+            const now = Date.now();
+            if (now - this.lastTickLogAt > 2_000) {
+                this.lastTickLogAt = now;
+                lyricLog("tick", {
+                    position: Math.round(evt.position),
+                    ...this.lyricStateSnapshot(),
+                });
+            }
             this.tickLyricRecoveryWatchdog(evt.position);
         });
 
         AppState.addEventListener("change", nextState => {
+            lyricLog("event:AppState", { nextState, ...this.lyricStateSnapshot() });
             if (nextState !== "active") {
                 return;
             }
             this.tickLyricRecoveryWatchdog();
             if (this.needsLyricRecovery()) {
+                lyricLog("appState:retry", this.lyricStateSnapshot());
                 this.retryCurrentLyric();
             }
         });
@@ -294,6 +339,7 @@ class LyricManager implements IInjectable {
 
     /** Force a lyric reload for the current track (e.g. after stuck loading UI). */
     retryCurrentLyric() {
+        lyricLog("retryCurrentLyric", this.lyricStateSnapshot());
         this.refreshLyric(false, false);
     }
 
@@ -353,6 +399,10 @@ class LyricManager implements IInjectable {
             return;
         }
 
+        lyricLog("watchdog:retry", {
+            stuckMs: now - (this.lyricRecoveryStuckSince ?? now),
+            ...this.lyricStateSnapshot(),
+        });
         this.lastLyricRecoveryRetryAt = now;
         this.lyricRecoveryStuckSince = now;
         this.retryCurrentLyric();
@@ -412,6 +462,7 @@ class LyricManager implements IInjectable {
     }
 
     private setLyricAsLoadingState() {
+        lyricLog("state:loading", { currentTrack: this.mkey(this.trackPlayer.currentMusic) });
         getDefaultStore().set(lyricStateAtom, {
             loading: true,
             lyrics: [],
@@ -424,6 +475,7 @@ class LyricManager implements IInjectable {
     }
 
     private setLyricAsNoLyricState() {
+        lyricLog("state:noLyric", { currentTrack: this.mkey(this.trackPlayer.currentMusic) });
         getDefaultStore().set(lyricStateAtom, {
             loading: false,
             lyrics: [],
@@ -481,8 +533,17 @@ class LyricManager implements IInjectable {
         const generation = ++this.lyricRefreshGeneration;
         const currentMusicItem = this.trackPlayer.currentMusic;
 
+        lyricLog("refresh:enter", {
+            generation,
+            skipFetchLyricSourceIfSame,
+            ignoreProgress,
+            currentTrack: this.mkey(currentMusicItem),
+            refreshInFlight: this.refreshInFlight,
+        });
+
         // 如果没有当前音乐项，重置歌词状态
         if (!currentMusicItem) {
+            lyricLog("refresh:noCurrentMusic", { generation, active: this.isActiveLyricRefresh(generation) });
             if (this.isActiveLyricRefresh(generation)) {
                 this.lyricParser = null;
                 this.setLyricAsNoLyricState();
@@ -503,44 +564,81 @@ class LyricManager implements IInjectable {
                 this.lyricParser &&
                 this.trackPlayer.isCurrentMusic(this.lyricParser.musicItem);
 
+            lyricLog("refresh:branch", { generation, canUseCachedParser: !!canUseCachedParser });
+
             if (canUseCachedParser) {
                 lrcSource = this.lyricParser!.lyricSource ?? null;
             } else {
                 if (!this.canCommitLyricRefresh(generation, currentMusicItem)) {
+                    lyricLog("refresh:abort", {
+                        generation,
+                        where: "beforeFetch",
+                        active: this.isActiveLyricRefresh(generation),
+                        isCurrent: this.trackPlayer.isCurrentMusic(currentMusicItem),
+                    });
                     return;
                 }
                 this.lyricParser = null;
                 this.setLyricAsLoadingState();
 
+                lyricLog("refresh:getLyric:start", { generation, currentTrack: this.mkey(currentMusicItem) });
                 const getLyric = this.pluginManager
                     .getByMedia(currentMusicItem)
                     ?.methods?.getLyric(currentMusicItem);
+                lyricLog("refresh:getLyric:hasMethod", { generation, hasMethod: getLyric != null });
                 lrcSource =
                     getLyric != null
                         ? (await this.withLyricFetchTimeout(getLyric)) ?? null
                         : null;
+                lyricLog("refresh:getLyric:done", {
+                    generation,
+                    gotSource: !!lrcSource,
+                    rawLrcLen: lrcSource?.rawLrc?.length ?? 0,
+                    active: this.isActiveLyricRefresh(generation),
+                    isCurrent: this.trackPlayer.isCurrentMusic(currentMusicItem),
+                });
             }
 
             if (!this.canCommitLyricRefresh(generation, currentMusicItem)) {
+                lyricLog("refresh:abort", {
+                    generation,
+                    where: "afterFetch",
+                    active: this.isActiveLyricRefresh(generation),
+                    isCurrent: this.trackPlayer.isCurrentMusic(currentMusicItem),
+                });
                 return;
             }
 
             // 如果歌词源不存在，并且开启自动搜索歌词
             if (!lrcSource && this.appConfig.getConfig("lyric.autoSearchLyric")) {
+                lyricLog("refresh:autoSearch:start", { generation });
                 this.setLyricAsLoadingState();
 
                 lrcSource =
                     (await this.withLyricFetchTimeout(
                         this.searchSimilarLyric(currentMusicItem),
                     )) ?? null;
+                lyricLog("refresh:autoSearch:done", {
+                    generation,
+                    gotSource: !!lrcSource,
+                    active: this.isActiveLyricRefresh(generation),
+                    isCurrent: this.trackPlayer.isCurrentMusic(currentMusicItem),
+                });
             }
 
             if (!this.canCommitLyricRefresh(generation, currentMusicItem)) {
+                lyricLog("refresh:abort", {
+                    generation,
+                    where: "afterAutoSearch",
+                    active: this.isActiveLyricRefresh(generation),
+                    isCurrent: this.trackPlayer.isCurrentMusic(currentMusicItem),
+                });
                 return;
             }
 
             // 如果源不存在，恢复默认设置
             if (!lrcSource) {
+                lyricLog("refresh:noSource", { generation });
                 this.lyricParser = null;
                 this.setLyricAsNoLyricState();
                 committed = true;
@@ -573,14 +671,31 @@ class LyricManager implements IInjectable {
                 );
             }
 
+            lyricLog("refresh:commit", {
+                generation,
+                lyricsLen: this.lyricParser.getLyricItems().length,
+                hasTranslation: !!lrcSource.translation,
+            });
             committed = true;
-        } catch {
+        } catch (e: any) {
+            lyricLog("refresh:catch", {
+                generation,
+                error: e?.message ?? String(e),
+                canCommit: this.canCommitLyricRefresh(generation, currentMusicItem),
+            });
             if (this.canCommitLyricRefresh(generation, currentMusicItem)) {
                 this.lyricParser = null;
                 this.setLyricAsNoLyricState();
                 committed = true;
             }
         } finally {
+            lyricLog("refresh:finally", {
+                generation,
+                committed,
+                active: this.isActiveLyricRefresh(generation),
+                isCurrent: this.trackPlayer.isCurrentMusic(currentMusicItem),
+                refreshInFlightBefore: this.refreshInFlight,
+            });
             // Only the active (latest) refresh owns the in-flight flag and the orphan
             // cleanup; a superseded refresh must leave both to the newer one still running.
             if (this.isActiveLyricRefresh(generation)) {

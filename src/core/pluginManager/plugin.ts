@@ -26,7 +26,7 @@ import { default as DeviceInfo, default as deviceInfoModule } from "react-native
 import RNFS, { exists, readFile, stat, writeFile } from "react-native-fs";
 import { URL } from "react-native-url-polyfill";
 import * as webdav from "webdav";
-import { devLog, errorLog, trace } from "../../utils/log";
+import { devLog, errorLog, lyricLog, trace } from "../../utils/log";
 import Network from "../../utils/network";
 import MediaCache from "../mediaCache";
 import _internalPluginMeta from "./meta";
@@ -353,7 +353,12 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
     async getLyric(
         originalMusicItem: IMusic.IMusicItemBase,
     ): Promise<ILyric.ILyricSource | null> {
+        lyricLog("plugin.getLyric:enter", {
+            plugin: this.plugin?.name,
+            track: `${originalMusicItem.platform}@${originalMusicItem.id}`,
+        });
         await this.ensurePluginIsMounted();
+        lyricLog("plugin.getLyric:mounted", { plugin: this.plugin?.name });
         // 1.额外存储的meta信息（关联歌词）
         const associatedLrc = getMediaExtraProperty(originalMusicItem, "associatedLrc");
         let musicItem: IMusic.IMusicItem;
@@ -406,6 +411,7 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
                     )) || null;
             }
 
+            lyricLog("plugin.getLyric:return", { source: "manualLocalLrc", rawLrcLen: rawLrc?.length ?? 0 });
             return {
                 rawLrc,
                 translation: translation || undefined, // TODO: 这里写的不好
@@ -423,6 +429,7 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
 
             // 优先用缓存的结果
             if (cacheLyric.rawLrc || cacheLyric.translation) {
+                lyricLog("plugin.getLyric:return", { source: "remoteCache", rawLrcLen: cacheLyric.rawLrc?.length ?? 0 });
                 return {
                     rawLrc: cacheLyric.rawLrc,
                     translation: cacheLyric.translation,
@@ -450,6 +457,7 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
                 }
 
                 if (!needRefetch && (rawLrc || translation)) {
+                    lyricLog("plugin.getLyric:return", { source: "localCacheFile", rawLrcLen: rawLrc?.length ?? 0 });
                     return {
                         rawLrc: rawLrc || undefined,
                         translation: translation || undefined,
@@ -459,6 +467,7 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
         }
 
         // 3. 无缓存歌词/无自带歌词/无本地歌词
+        lyricLog("plugin.getLyric:remoteFetch:start", { plugin: this.plugin?.name });
         let lrcSource: ILyric.ILyricSource | null;
         if (isSameMediaItem(originalMusicItem, musicItem)) {
             lrcSource =
@@ -473,6 +482,7 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
                     )
                     ?.catch(() => null)) || null;
         }
+        lyricLog("plugin.getLyric:remoteFetch:done", { gotSource: !!lrcSource, rawLrcLen: lrcSource?.rawLrc?.length ?? 0 });
 
         if (lrcSource) {
             rawLrc = lrcSource?.rawLrc || rawLrc;
@@ -523,6 +533,7 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
                         return draft;
                     }),
                 );
+                lyricLog("plugin.getLyric:return", { source: "remoteFetched", rawLrcLen: rawLrc?.length ?? 0 });
                 return {
                     rawLrc: rawLrc || undefined,
                     translation: translation || undefined,
@@ -540,10 +551,12 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
             devLog("info", "本地文件歌词");
 
             if (res) {
+                lyricLog("plugin.getLyric:return", { source: "localFile", rawLrcLen: res.rawLrc?.length ?? 0 });
                 return res;
             }
         }
         devLog("warn", "无歌词");
+        lyricLog("plugin.getLyric:return", { source: "none" });
 
         return null;
     }
@@ -888,6 +901,12 @@ export class Plugin {
     }
 
     async ensureMounted() {
+        lyricLog("plugin.ensureMounted:enter", {
+            plugin: this.name,
+            state: this.state,
+            lazy: !!this.lazyProps,
+            hasGetLyric: typeof this.instance?.getLyric === "function",
+        });
         if ((this.state === PluginState.Initializing) && this.lazyProps) {
             this.state = PluginState.Loading;
             // 懒加载
@@ -900,6 +919,11 @@ export class Plugin {
                 this.errorReason = this.errorReason ?? PluginErrorReason.CannotParse;
             }
         }
+        lyricLog("plugin.ensureMounted:exit", {
+            plugin: this.name,
+            state: this.state,
+            hasGetLyric: typeof this.instance?.getLyric === "function",
+        });
     }
 
     private mountPlugin(
