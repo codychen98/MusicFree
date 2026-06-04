@@ -17,7 +17,7 @@ import LyricOperations from "./lyricOperations";
 import { IParsedLrcItem } from "@/utils/lrcParser";
 import { IconButtonWithGesture } from "@/components/base/iconButton.tsx";
 import { getMediaExtraProperty } from "@/utils/mediaExtra";
-import lyricManager, { LYRIC_UI_STUCK_RETRY_MS, useCurrentLyricItem, useLyricState } from "@/core/lyricManager";
+import lyricManager, { useCurrentLyricItem, useLyricState } from "@/core/lyricManager";
 import { useI18N } from "@/core/i18n";
 
 const ITEM_HEIGHT = rpx(92);
@@ -163,30 +163,7 @@ export default function Lyric(props: IProps) {
         };
     }, []);
 
-    // Recover from orphaned loading or frozen lyrics (parser out of sync with UI).
-    useEffect(() => {
-        if (!currentMusicItem) {
-            return;
-        }
-        const trackKey = `${currentMusicItem.platform}@${currentMusicItem.id}`;
-        const timer = setTimeout(() => {
-            const playing = TrackPlayer.currentMusic;
-            if (
-                !playing ||
-                `${playing.platform}@${playing.id}` !== trackKey
-            ) {
-                return;
-            }
-            const stillStuck =
-                lyricManager.lyricState.loading ||
-                lyricManager.isLyricDisplayStale();
-            if (!stillStuck) {
-                return;
-            }
-            lyricManager.retryCurrentLyric();
-        }, LYRIC_UI_STUCK_RETRY_MS);
-        return () => clearTimeout(timer);
-    }, [loading, lyrics.length, currentMusicItem?.id, currentMusicItem?.platform]);
+    // Lyric recovery watchdog lives in lyricManager (progress + playback service), not here.
 
     // 开始滚动时拖拽生效
     const onScrollBeginDrag = () => {

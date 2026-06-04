@@ -1,4 +1,5 @@
 import Config from "@/core/appConfig";
+import lyricManager from "@/core/lyricManager";
 import RNTrackPlayer, { Event, State } from "react-native-track-player";
 import TrackPlayer from "@/core/trackPlayer";
 import NativeUtils from "@/native/utils";
@@ -64,6 +65,8 @@ module.exports = async function () {
             position: evt.position,
             duration: evt.duration,
         });
+        // Playback service keeps running in background; recover desktop lyrics here.
+        lyricManager.tickLyricRecoveryWatchdog(evt.position);
     });
 
     RNTrackPlayer.addEventListener(Event.RemoteStop, async () => {

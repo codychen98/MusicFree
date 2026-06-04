@@ -3,7 +3,7 @@ import { ITrackPlayer } from "@/types/core/trackPlayer";
 import { IInjectable } from "@/types/infra";
 import LyricParser, { IParsedLrcItem } from "@/utils/lrcParser";
 import { getMediaExtraProperty, patchMediaExtra } from "@/utils/mediaExtra";
-import { isSameMediaItem } from "@/utils/mediaUtils";
+import { getMediaUniqueKey, isSameMediaItem } from "@/utils/mediaUtils";
 import minDistance from "@/utils/minDistance";
 import { atom, getDefaultStore, useAtomValue } from "jotai";
 import { Plugin } from "./pluginManager";
@@ -15,6 +15,7 @@ import { checkAndCreateDir } from "@/utils/fileUtils";
 import PersistStatus from "@/utils/persistStatus";
 import CryptoJs from "crypto-js";
 import { unlink, writeFile } from "react-native-fs";
+import { AppState } from "react-native";
 import RNTrackPlayer, { Event } from "react-native-track-player";
 import { TrackPlayerEvents } from "@/core.defination/trackPlayer";
 import { IPluginManager } from "@/types/core/pluginManager";
@@ -53,6 +54,12 @@ class LyricManager implements IInjectable {
 
     /** Monotonic id; only the latest refreshLyric call may commit lyric state. */
     private lyricRefreshGeneration = 0;
+
+    /** Background/desktop recovery: detect stuck state without the lyrics tab mounted. */
+    private lyricRecoveryTrackKey: string | null = null;
+    private lyricRecoveryStuckSince: number | null = null;
+    private lastLyricRecoveryRetryAt = 0;
+    private static readonly LYRIC_RECOVERY_RETRY_COOLDOWN_MS = 3_000;
 
     get currentLyricItem() {
         return getDefaultStore().get(currentLyricItemAtom);
@@ -137,6 +144,7 @@ class LyricManager implements IInjectable {
     setup() {
         // 更新歌词
         this.trackPlayer.on(TrackPlayerEvents.CurrentMusicChanged, () => {
+            this.resetLyricRecoveryWatchdog();
             // Always refetch on track change so stale lyrics/parser from a prior song
             // cannot remain when overlapping refreshLyric calls abort mid-flight.
             this.refreshLyric(false, true);
@@ -147,6 +155,8 @@ class LyricManager implements IInjectable {
         });
 
         RNTrackPlayer.addEventListener(Event.PlaybackProgressUpdated, evt => {
+            this.tickLyricRecoveryWatchdog(evt.position);
+
             const parser = this.lyricParser;
             if (!parser || !this.trackPlayer.isCurrentMusic(parser.musicItem)) {
                 return;
@@ -155,12 +165,10 @@ class LyricManager implements IInjectable {
             const currentLyricItem = getDefaultStore().get(currentLyricItemAtom);
             const newLyricItem = parser.getPosition(evt.position);
 
-
             if (
                 currentLyricItem?.index !== newLyricItem?.index ||
                 currentLyricItem?.lrc !== newLyricItem?.lrc
             ) {
-                // 更新当前歌词状态
                 getDefaultStore().set(currentLyricItemAtom, newLyricItem ?? null);
 
                 if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
@@ -169,6 +177,16 @@ class LyricManager implements IInjectable {
                         this.lyricState.lyrics,
                     );
                 }
+            }
+        });
+
+        AppState.addEventListener("change", nextState => {
+            if (nextState !== "active") {
+                return;
+            }
+            this.tickLyricRecoveryWatchdog();
+            if (this.needsLyricRecovery()) {
+                this.retryCurrentLyric();
             }
         });
 
@@ -290,6 +308,61 @@ class LyricManager implements IInjectable {
         this.refreshLyric(false, false);
     }
 
+    needsLyricRecovery(): boolean {
+        if (!this.trackPlayer.currentMusic) {
+            return false;
+        }
+        return this.lyricState.loading || this.isLyricDisplayStale();
+    }
+
+    /**
+     * Runs on every playback progress tick (including background via playback service).
+     * Resyncs desktop/in-app lyrics when the parser is valid but the highlight drifted,
+     * and retries fetch after {@link LYRIC_UI_STUCK_RETRY_MS} when loading or parser-less.
+     */
+    tickLyricRecoveryWatchdog(position?: number): void {
+        const currentMusic = this.trackPlayer.currentMusic;
+        if (!currentMusic) {
+            this.resetLyricRecoveryWatchdog();
+            return;
+        }
+
+        const trackKey = getMediaUniqueKey(currentMusic);
+        if (this.lyricRecoveryTrackKey !== trackKey) {
+            this.lyricRecoveryTrackKey = trackKey;
+            this.lyricRecoveryStuckSince = null;
+        }
+
+        if (position != null && this.tryResyncLyricToPosition(position)) {
+            this.lyricRecoveryStuckSince = null;
+            return;
+        }
+
+        if (!this.needsLyricRecovery()) {
+            this.lyricRecoveryStuckSince = null;
+            return;
+        }
+
+        const now = Date.now();
+        if (this.lyricRecoveryStuckSince === null) {
+            this.lyricRecoveryStuckSince = now;
+            return;
+        }
+        if (now - this.lyricRecoveryStuckSince < LYRIC_UI_STUCK_RETRY_MS) {
+            return;
+        }
+        if (
+            now - this.lastLyricRecoveryRetryAt <
+            LyricManager.LYRIC_RECOVERY_RETRY_COOLDOWN_MS
+        ) {
+            return;
+        }
+
+        this.lastLyricRecoveryRetryAt = now;
+        this.lyricRecoveryStuckSince = now;
+        this.retryCurrentLyric();
+    }
+
     /**
      * True when lyrics are shown for a track but the in-memory parser is missing or
      * bound to another track (progress events will not advance the highlight).
@@ -312,6 +385,37 @@ class LyricManager implements IInjectable {
         return generation === this.lyricRefreshGeneration;
     }
 
+    private resetLyricRecoveryWatchdog() {
+        this.lyricRecoveryTrackKey = null;
+        this.lyricRecoveryStuckSince = null;
+    }
+
+    /** Parser matches current track but highlight/overlay drifted from playback position. */
+    private tryResyncLyricToPosition(position: number): boolean {
+        const parser = this.lyricParser;
+        if (!parser || !this.trackPlayer.isCurrentMusic(parser.musicItem)) {
+            return false;
+        }
+
+        const newLyricItem = parser.getPosition(position);
+        const currentLyricItem = getDefaultStore().get(currentLyricItemAtom);
+        if (
+            currentLyricItem?.index === newLyricItem?.index &&
+            currentLyricItem?.lrc === newLyricItem?.lrc
+        ) {
+            return false;
+        }
+
+        getDefaultStore().set(currentLyricItemAtom, newLyricItem ?? null);
+        if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
+            this.updateStatusBarLyricOverlay(
+                newLyricItem ?? null,
+                this.lyricState.lyrics,
+            );
+        }
+        return true;
+    }
+
     private setLyricAsLoadingState() {
         getDefaultStore().set(lyricStateAtom, {
             loading: true,
@@ -319,6 +423,9 @@ class LyricManager implements IInjectable {
             hasTranslation: false,
         });
         getDefaultStore().set(currentLyricItemAtom, null);
+        if (this.appConfig.getConfig("lyric.showStatusBarLyric")) {
+            this.updateStatusBarLyricOverlay(null, []);
+        }
     }
 
     private setLyricAsNoLyricState() {
