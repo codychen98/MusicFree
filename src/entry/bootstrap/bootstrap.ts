@@ -131,6 +131,15 @@ async function bootstrapImpl() {
         }
     });
 
+    // initTrackPlayer() calls lyricManager.setup() at its tail, but it can reject before
+    // reaching it when the app is launched/woken in the background (RNTrackPlayer.setupPlayer
+    // cannot start its foreground service then). The player later recovers lazily on play
+    // via setupPlayer(), but that path never re-runs lyricManager.setup(), so the lyric
+    // event listeners stay unregistered and lyrics are stuck on 加载中... until a full
+    // process restart. setup() is idempotent, so this guarantees the listeners exist
+    // regardless of whether the player init above succeeded.
+    lyricManager.setup();
+
     await LocalMusicSheet.setup();
     trace("本地音乐初始化完成");
     logger.mark("本地音乐初始化完成");

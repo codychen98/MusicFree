@@ -72,6 +72,15 @@ class LyricManager implements IInjectable {
     /** [debug] throttle for the per-second progress-tick state log. */
     private lastTickLogAt = 0;
 
+    /**
+     * Guard so the lyric event listeners are registered exactly once. setup() is the only
+     * place those listeners are wired, and it can legitimately be invoked more than once
+     * (e.g. the track-player re-init/recovery path), so it must be idempotent to avoid
+     * duplicate listeners — and to guarantee a single registration when the initial
+     * player init failed and setup is retried from bootstrap.
+     */
+    private didSetup = false;
+
     /** [debug] Compact identity of a music item for logs. */
     private mkey(m?: IMusic.IMusicItem | null): string | null {
         return m ? `${m.platform}@${m.id}` : null;
@@ -180,6 +189,10 @@ class LyricManager implements IInjectable {
     }
 
     setup() {
+        if (this.didSetup) {
+            return;
+        }
+        this.didSetup = true;
         lyricLog("setup", this.lyricStateSnapshot());
         // 更新歌词
         this.trackPlayer.on(TrackPlayerEvents.CurrentMusicChanged, () => {
