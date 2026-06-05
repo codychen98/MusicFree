@@ -1,7 +1,6 @@
 import "react-native-get-random-values";
 
 import { getCurrentDialog, showDialog } from "@/components/dialogs/useDialog.ts";
-import { ImgAsset } from "@/constants/assetsConst";
 import { emptyFunction, localPluginHash, supportLocalMediaType } from "@/constants/commonConst";
 import pathConst from "@/constants/pathConst";
 import Config from "@/core/appConfig";
@@ -36,7 +35,8 @@ import Toast from "@/utils/toast";
 import * as SplashScreen from "expo-splash-screen";
 import {  Linking, Platform } from "react-native";
 import { PERMISSIONS, check, request } from "react-native-permissions";
-import RNTrackPlayer, { AppKilledPlaybackBehavior, Capability } from "react-native-track-player";
+import RNTrackPlayer from "react-native-track-player";
+import { configureTrackPlayerOptions } from "@/core/control/configureTrackPlayerOptions";
 import i18n from "@/core/i18n";
 import bootstrapAtom from "./bootstrap.atom";
 import { getDefaultStore } from "jotai";
@@ -192,35 +192,7 @@ export async function initTrackPlayer(logger?: IPerfLogger) {
         }
         logger?.mark("加载播放器");
 
-        const capabilities = Config.getConfig("basic.showExitOnNotification")
-            ? [
-                Capability.SkipToPrevious,
-                Capability.Play,
-                Capability.Pause,
-                Capability.SkipToNext,
-                Capability.Stop,
-            ]
-            : [
-                Capability.Play,
-                Capability.Pause,
-                Capability.SkipToNext,
-                Capability.SkipToPrevious,
-            ];
-        await RNTrackPlayer.updateOptions({
-            icon: ImgAsset.logoTransparent,
-            stopIcon: ImgAsset.notificationExit,
-            progressUpdateEventInterval: 1,
-            android: {
-                alwaysPauseOnInterruption: true,
-                appKilledPlaybackBehavior:
-                    AppKilledPlaybackBehavior.ContinuePlayback,
-            },
-            capabilities: capabilities,
-            compactCapabilities: capabilities,
-            // Omit SeekTo here: it was appended after Stop and showed as a second
-            // square that often matched Stop behavior. Scrubbing still uses RemoteSeek.
-            notificationCapabilities: capabilities,
-        });
+        await configureTrackPlayerOptions();
         logger?.mark("播放器初始化完成");
         trace("播放器初始化完成");
 

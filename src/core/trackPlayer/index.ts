@@ -49,6 +49,7 @@ import minDistance from "@/utils/minDistance";
 import { IPluginManager } from "@/types/core/pluginManager";
 import { ImgAsset } from "@/constants/assetsConst";
 import { resolveImportedAssetOrPath } from "@/utils/fileUtils";
+import { configureTrackPlayerOptions } from "@/core/control/configureTrackPlayerOptions";
 
 
 
@@ -765,6 +766,11 @@ class TrackPlayer extends EventEmitter<{
                 "The player is not initialized. Call setupPlayer first."
             ) {
                 await ReactNativeTrackPlayer.setupPlayer();
+                // Re-apply options after the bare setupPlayer recovery, otherwise the
+                // re-created player has no progressUpdateEventInterval and
+                // PlaybackProgressUpdated never fires — freezing lyric line sync (and
+                // other progress-driven UI) until a full restart.
+                await configureTrackPlayerOptions();
                 this.play(musicItem, forcePlay);
             } else if (message === PlayFailReason.FORBID_CELLUAR_NETWORK_PLAY) {
                 if (getCurrentDialog()?.name !== "SimpleDialog") {
