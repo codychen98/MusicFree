@@ -494,6 +494,36 @@ class TrackPlayer extends EventEmitter<{
         this.setPlayList(newPlayList);
     }
 
+    /** Re-fetch media when a renamed track is currently playing (identity / path changed). */
+    async refreshAfterTrackRename(
+        oldItem: IMusic.IMusicItem,
+        newItem: IMusic.IMusicItem,
+    ): Promise<void> {
+        if (!this.isCurrentMusic(newItem) && !this.isCurrentMusic(oldItem)) {
+            return;
+        }
+
+        if (this.getMusicIndexInPlayList(newItem) === -1) {
+            return;
+        }
+
+        const { position = 0 } = await ReactNativeTrackPlayer.getProgress();
+        const playbackState = (
+            await ReactNativeTrackPlayer.getPlaybackState()
+        ).state;
+        const wasPlaying = !musicIsPaused(playbackState);
+
+        await this.play(newItem, false);
+
+        if (position > 0) {
+            await this.seekTo(position);
+        }
+
+        if (!wasPlaying) {
+            await this.pause();
+        }
+    }
+
     async remove(musicItem: IMusic.IMusicItem): Promise<void> {
         const playList = this.playList;
 

@@ -19,6 +19,7 @@ import ImageViewer from "./imageViewer";
 import MusicComment from "./musicComment";
 import MusicItemLyricOptions from "./musicItemLyricOptions";
 import EditMusicSheetInfo from "./editMusicSheetInfo";
+import RenameMusicTrack from "./renameMusicTrack";
 
 export default {
     /** 加入歌单 */
@@ -61,4 +62,5 @@ export default {
     MusicComment,
     MusicItemLyricOptions,
     EditMusicSheetInfo,
+    RenameMusicTrack,
 };

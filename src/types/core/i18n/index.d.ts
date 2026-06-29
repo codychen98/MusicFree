@@ -454,6 +454,11 @@ export interface ILanguageData {
     "panel.searchLrc.inputPlaceholder": string; // 搜索歌词输入占位符
     "panel.searchLrc.toast.settingSuccess": string; // 设置成功
     "panel.searchLrc.toast.failToSearch": string; // 设置失败
+    "panel.searchLrc.toast.webdavSaved": string; // WebDAV 歌词保存成功
+    "panel.searchLrc.toast.webdavConfigIncomplete": string; // WebDAV 未配置完整
+    "panel.searchLrc.toast.lyricEmpty": string; // 歌词为空
+    "panel.searchLrc.toast.uploadFailed": string; // 上传失败
+    "panel.searchLrc.toast.saveFailed": string; // 保存失败
 
     // 面板相关 - 添加到歌单
     "panel.addToMusicSheet.title": string; // 添加到歌单
@@ -513,6 +518,18 @@ export interface ILanguageData {
     "panel.musicItemOptions.clearPluginCache": string; // 清除插件缓存
     "panel.musicItemOptions.cacheCleared": string; // 缓存已清除
     "panel.musicItemOptions.deleteFailed": string; // 删除失败
+    "panel.renameTrack.menuItem": string; // 重命名菜单项
+    "panel.renameTrack.title": string; // 重命名标题
+    "panel.renameTrack.titleLabel": string; // 标题标签
+    "panel.renameTrack.titlePlaceholder": string; // 标题占位符
+    "panel.renameTrack.artistLabel": string; // 艺术家标签
+    "panel.renameTrack.artistPlaceholder": string; // 艺术家占位符
+    "panel.renameTrack.success": string; // 重命名成功
+    "panel.renameTrack.targetExists": string; // 目标已存在
+    "panel.renameTrack.failed": string; // 重命名失败
+    "panel.renameTrack.invalidInput": string; // 输入无效
+    "panel.renameTrack.webdavConfigIncomplete": string; // WebDAV 未配置完整
+    "panel.renameTrack.loading": string; // 重命名中
 
     // 面板相关 - 音质设置
     "panel.musicQuality.title": string; // 设置音质

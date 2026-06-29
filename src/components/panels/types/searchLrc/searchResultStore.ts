@@ -9,6 +9,7 @@ export interface ISearchLyricResult {
 
 interface ISearchLyricStoreData {
     query?: string;
+    targetMusicItem?: IMusic.IMusicItem | null;
     // plugin - result
     data: Record<string, ISearchLyricResult>;
 }

@@ -3,6 +3,12 @@ import LyricItem from "@/components/mediaItem/LyricItem";
 import { RequestStateCode } from "@/constants/commonConst";
 import lyricManager from "@/core/lyricManager";
 import TrackPlayer from "@/core/trackPlayer";
+import { WEBDAV_MUSIC_PLUGIN_PLATFORM } from "@/core/webdav-download/config";
+import {
+    SaveSearchedLyricError,
+    SaveSearchedLyricErrorCode,
+    saveSearchedLyric,
+} from "@/core/saveSearchedLyric";
 import rpx from "@/utils/rpx";
 import Toast from "@/utils/toast";
 import React, { memo } from "react";
@@ -29,10 +35,33 @@ interface ILyricListProps {
     data: ISearchLyricResult;
 }
 
+function resolveSaveLyricErrorMessage(
+    error: unknown,
+    t: (key: string) => string,
+): string {
+    if (error instanceof SaveSearchedLyricError) {
+        switch (error.code) {
+            case SaveSearchedLyricErrorCode.WEBDAV_CONFIG_INCOMPLETE:
+                return t("panel.searchLrc.toast.webdavConfigIncomplete");
+            case SaveSearchedLyricErrorCode.LYRIC_EMPTY:
+                return t("panel.searchLrc.toast.lyricEmpty");
+            case SaveSearchedLyricErrorCode.UPLOAD_FAILED:
+                return t("panel.searchLrc.toast.uploadFailed");
+            default:
+                return t("panel.searchLrc.toast.saveFailed");
+        }
+    }
+    if (error instanceof Error && error.message) {
+        return `${t("panel.searchLrc.toast.saveFailed")} ${error.message}`;
+    }
+    return t("panel.searchLrc.toast.saveFailed");
+}
+
 const ITEM_HEIGHT = rpx(120);
 function LyricListImpl(props: ILyricListProps) {
     const data = props.data;
     const searchState = data?.state ?? RequestStateCode.IDLE;
+    const targetMusicItem = searchResultStore.useValue().targetMusicItem;
 
     const { t } = useI18N();
 
@@ -46,17 +75,25 @@ function LyricListImpl(props: ILyricListProps) {
                     lyricItem={item}
                     onPress={async () => {
                         try {
-                            const currentMusic = TrackPlayer.currentMusic;
-                            if (!currentMusic) {
+                            const musicItem =
+                                targetMusicItem ?? TrackPlayer.currentMusic;
+                            if (!musicItem) {
                                 return;
                             }
 
-                            lyricManager.associateLyric(currentMusic, item);
-                            Toast.success(t("panel.searchLrc.toast.settingSuccess"));
+                            await saveSearchedLyric(musicItem, item);
+                            if (TrackPlayer.isCurrentMusic(musicItem)) {
+                                lyricManager.retryCurrentLyric();
+                            }
+                            const successKey =
+                                musicItem.platform ===
+                                WEBDAV_MUSIC_PLUGIN_PLATFORM
+                                    ? "panel.searchLrc.toast.webdavSaved"
+                                    : "panel.searchLrc.toast.settingSuccess";
+                            Toast.success(t(successKey));
                             hidePanel();
-                            // 触发刷新歌词
-                        } catch {
-                            Toast.warn(t("panel.searchLrc.toast.failToSearch"));
+                        } catch (error: unknown) {
+                            Toast.warn(resolveSaveLyricErrorMessage(error, t));
                         }
                     }}
                 />

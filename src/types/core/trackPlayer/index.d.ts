@@ -190,4 +190,12 @@ export interface ITrackPlayer extends IInjectable, EventEmitter<{
      * @param position 目标位置（秒）
      */
     seekTo(position: number): Promise<void>;
+
+    /**
+     * Re-fetch media source when a renamed track is currently playing.
+     */
+    refreshAfterTrackRename(
+        oldItem: IMusic.IMusicItem,
+        newItem: IMusic.IMusicItem,
+    ): Promise<void>;
 }

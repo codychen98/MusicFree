@@ -31,6 +31,8 @@ import { getMediaExtraProperty } from "@/utils/mediaExtra";
 import lyricManager from "@/core/lyricManager";
 import { useI18N } from "@/core/i18n";
 import pluginManager from "@/core/pluginManager";
+import { canRenameMusicTrack } from "@/core/renameTrack";
+import { WEBDAV_MUSIC_PLUGIN_PLATFORM } from "@/core/webdav-download/config";
 
 interface IMusicItemOptionsProps {
     /** 歌曲信息 */
@@ -57,6 +59,8 @@ export default function MusicItemOptions(props: IMusicItemOptionsProps) {
     const safeAreaInsets = useSafeAreaInsets();
 
     const downloaded = LocalMusicSheet.isLocalMusic(musicItem);
+    const isWebdav = musicItem.platform === WEBDAV_MUSIC_PLUGIN_PLATFORM;
+    const canRename = canRenameMusicTrack(musicItem);
     const associatedLrc = getMediaExtraProperty(musicItem, "associatedLrc");
 
     const options: IOption[] = [
@@ -138,6 +142,14 @@ export default function MusicItemOptions(props: IMusicItemOptionsProps) {
             show: !!downloaded,
         },
         {
+            icon: "pencil-square",
+            title: t("panel.renameTrack.menuItem"),
+            show: canRename,
+            onPress: () => {
+                showPanel("RenameMusicTrack", { musicItem });
+            },
+        },
+        {
             icon: "trash-outline",
             title: t("common.delete"),
             show: !!musicSheet,
@@ -188,9 +200,10 @@ export default function MusicItemOptions(props: IMusicItemOptionsProps) {
         },
         {
             icon: "link",
-            title: associatedLrc
-                ? t("panel.musicItemOptions.associatedLyric", { platform: associatedLrc.platform, id: associatedLrc.id })
-                : t("panel.musicItemOptions.associateLyric"),
+            title:
+                associatedLrc && !isWebdav
+                    ? t("panel.musicItemOptions.associatedLyric", { platform: associatedLrc.platform, id: associatedLrc.id })
+                    : t("panel.musicItemOptions.associateLyric"),
             onPress: async () => {
                 if (
                     Config.getConfig("basic.associateLyricType") === "input"
@@ -208,7 +221,7 @@ export default function MusicItemOptions(props: IMusicItemOptionsProps) {
         {
             icon: "link-slash",
             title: t("panel.musicItemOptions.unassociateLyric"),
-            show: !!associatedLrc,
+            show: !!associatedLrc && !isWebdav,
             onPress: async () => {
                 lyricManager.unassociateLyric(musicItem);
                 Toast.success(t("panel.musicItemOptions.unassociateLyricSuccess"));

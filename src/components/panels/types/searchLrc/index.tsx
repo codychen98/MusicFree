@@ -9,8 +9,10 @@ import PanelBase from "../../base/panelBase";
 import { TextInput } from "react-native-gesture-handler";
 import useSearchLrc from "./useSearchLrc";
 import PluginManager from "@/core/pluginManager";
+import TrackPlayer from "@/core/trackPlayer";
 import { SceneMap, TabBar, TabView } from "react-native-tab-view";
 import LyricList from "./LyricList";
+import searchResultStore from "./searchResultStore";
 import globalStyle from "@/constants/globalStyle";
 import NoPlugin from "@/components/base/noPlugin";
 import { useI18N } from "@/core/i18n";
@@ -30,6 +32,10 @@ export default function SearchLrc(props: INewMusicSheetProps) {
     const searchLrc = useSearchLrc();
 
     useEffect(() => {
+        searchResultStore.setValue(prev => ({
+            ...prev,
+            targetMusicItem: musicItem ?? TrackPlayer.currentMusic ?? null,
+        }));
         if (musicItem) {
             searchLrc(musicItem.alias || musicItem.title, 1);
         }

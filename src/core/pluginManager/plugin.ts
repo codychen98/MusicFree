@@ -28,6 +28,8 @@ import { URL } from "react-native-url-polyfill";
 import * as webdav from "webdav";
 import { devLog, errorLog, lyricLog, trace } from "../../utils/log";
 import Network from "../../utils/network";
+import { WEBDAV_MUSIC_PLUGIN_PLATFORM } from "@/core/webdav-download/config";
+import { fetchRemoteSidecarLyrics } from "@/core/webdav-download/sidecar";
 import MediaCache from "../mediaCache";
 import _internalPluginMeta from "./meta";
 import { IPluginManager } from "@/types/core/pluginManager";
@@ -357,6 +359,33 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
             plugin: this.plugin?.name,
             track: `${originalMusicItem.platform}@${originalMusicItem.id}`,
         });
+
+        if (originalMusicItem.platform === WEBDAV_MUSIC_PLUGIN_PLATFORM) {
+            try {
+                const sidecar = await fetchRemoteSidecarLyrics(originalMusicItem.id);
+                if (sidecar.rawLrc || sidecar.translation) {
+                    let rawLrc = sidecar.rawLrc;
+                    let translation = sidecar.translation;
+                    if (!rawLrc) {
+                        rawLrc = translation;
+                        translation = undefined;
+                    }
+                    lyricLog("plugin.getLyric:return", {
+                        source: "webdavSidecar",
+                        rawLrcLen: rawLrc?.length ?? 0,
+                    });
+                    return {
+                        rawLrc,
+                        translation,
+                    };
+                }
+            } catch {
+                // WebDAV config missing or remote read failed
+            }
+            lyricLog("plugin.getLyric:return", { source: "webdavSidecarNone" });
+            return null;
+        }
+
         await this.ensurePluginIsMounted();
         lyricLog("plugin.getLyric:mounted", { plugin: this.plugin?.name });
         // 1.额外存储的meta信息（关联歌词）

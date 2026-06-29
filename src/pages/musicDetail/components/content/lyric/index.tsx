@@ -18,6 +18,7 @@ import { IParsedLrcItem } from "@/utils/lrcParser";
 import { IconButtonWithGesture } from "@/components/base/iconButton.tsx";
 import { getMediaExtraProperty } from "@/utils/mediaExtra";
 import lyricManager, { useCurrentLyricItem, useLyricState } from "@/core/lyricManager";
+import { WEBDAV_MUSIC_PLUGIN_PLATFORM } from "@/core/webdav-download/config";
 import { useI18N } from "@/core/i18n";
 import { lyricLog } from "@/utils/log";
 
@@ -67,7 +68,22 @@ export default function Lyric(props: IProps) {
     const listRef = useRef<FlatList<IParsedLrcItem> | null>();
 
     const currentMusicItem = useCurrentMusic();
-    const associateMusicItem = getMediaExtraProperty(currentMusicItem, "associatedLrc");
+    const isWebdavTrack =
+        currentMusicItem?.platform === WEBDAV_MUSIC_PLUGIN_PLATFORM;
+    const associateMusicItem = isWebdavTrack
+        ? null
+        : getMediaExtraProperty(currentMusicItem, "associatedLrc");
+
+    // WebDAV lyrics come from remote sidecars only; drop stale linked-lyric metadata.
+    useEffect(() => {
+        if (!currentMusicItem || !isWebdavTrack) {
+            return;
+        }
+        const staleLink = getMediaExtraProperty(currentMusicItem, "associatedLrc");
+        if (staleLink) {
+            lyricManager.unassociateLyric(currentMusicItem);
+        }
+    }, [currentMusicItem, isWebdavTrack]);
 
     // 是否展示拖拽
     const dragShownRef = useRef(false);
