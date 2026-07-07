@@ -189,6 +189,7 @@ export interface ILanguageData {
     "pluginSetting.pluginItem.options.userVariables": string; // 用户变量
     "pluginSetting.pluginItem.versionHint": string; // 版本提示
     "pluginSetting.pluginItem.author": string; // 作者
+    "pluginSetting.pluginItem.supersededByBuiltinRemote": string; // 已被内置远程音乐源取代
     "pluginSetting.menu.subscriptionSetting": string; // 订阅设置
     "pluginSetting.menu.sort": string; // 排序
     "pluginSetting.menu.uninstallAll": string; // 卸载所有
@@ -377,6 +378,9 @@ export interface ILanguageData {
     "basicSettings.cache.clearMusicCache": string; // 清除音乐缓存
     "basicSettings.cache.clearLyricCache": string; // 清除歌词缓存
     "basicSettings.cache.clearImageCache": string; // 清除图片缓存
+    "basicSettings.cache.remotePlaybackCacheEnabled": string; // 离线播放缓存
+    "basicSettings.cache.autoCachePlayedRemoteMusic": string; // 自动缓存已播放的远程歌曲
+    "basicSettings.cache.clearRemotePlaybackCache": string; // 清除离线播放缓存
     
     "basicSettings.developer": string; // 开发选项
     "basicSettings.developer.errorLog": string; // 记录错误日志
@@ -394,6 +398,8 @@ export interface ILanguageData {
     "dialog.clearLyricCacheContent": string; // 清除歌词缓存确认内容
     "dialog.clearImageCacheTitle": string; // 清除图片缓存
     "dialog.clearImageCacheContent": string; // 清除图片缓存确认内容
+    "dialog.clearRemotePlaybackCacheTitle": string; // 清除离线播放缓存
+    "dialog.clearRemotePlaybackCacheContent": string; // 清除离线播放缓存确认内容
     "dialog.errorLogTitle": string; // 错误日志
     "dialog.errorLogNoRecord": string; // 暂无记录
     "dialog.errorLogKnow": string; // 我知道了
@@ -408,6 +414,7 @@ export interface ILanguageData {
     "toast.musicCacheCleared": string; // 已清除音乐缓存
     "toast.lyricCacheCleared": string; // 已清除歌词缓存
     "toast.imageCacheCleared": string; // 已清除图片缓存
+    "toast.remotePlaybackCacheCleared": string; // 已清除离线播放缓存
     "toast.logCleared": string; // 日志已清空
     "toast.noFloatWindowPermission": string; // 无悬浮窗权限
     "toast.carMode.emptyFavorites": string; // 收藏夹为空

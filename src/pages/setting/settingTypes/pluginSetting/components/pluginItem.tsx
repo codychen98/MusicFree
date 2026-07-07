@@ -16,6 +16,8 @@ import { IIconName } from "@/components/base/icon.tsx";
 import { useI18N } from "@/core/i18n";
 import IconButton from "@/components/base/iconButton";
 import useRerender from "@/hooks/useRerender";
+import { REMOTE_MUSIC_PLUGIN_PLATFORM } from "@/core/remote-storage/remote-config";
+import { isRemoteMusicAvailable } from "@/core/webdav-download/config";
 
 interface IPluginItemProps {
     plugin: Plugin;
@@ -36,6 +38,9 @@ function _PluginItem(props: IPluginItemProps) {
     const rerender = useRerender();
 
     const alternativePluginName = pluginManager.getAlternativePluginName(plugin);
+
+    const isSupersededByBuiltinRemote =
+        plugin.name === REMOTE_MUSIC_PLUGIN_PLATFORM && isRemoteMusicAvailable();
 
     const options: IOption[] = [
         {
@@ -256,6 +261,11 @@ function _PluginItem(props: IPluginItemProps) {
                     })}
                 </ThemeText>
             </View> : null}
+            {isSupersededByBuiltinRemote ? <View style={styles.supersededDescription}>
+                <ThemeText fontSize="subTitle" fontColor="textHighlight">
+                    {t("pluginSetting.pluginItem.supersededByBuiltinRemote")}
+                </ThemeText>
+            </View> : null}
             <View style={styles.contents}>
                 {options.map((it, index) =>
                     it.show !== false ? (
@@ -347,6 +357,11 @@ const styles = StyleSheet.create({
         flexDirection: "row",
     },
     alternativePluginDescription: {
+        marginHorizontal: rpx(16),
+        marginBottom: rpx(24),
+        flexDirection: "row",
+    },
+    supersededDescription: {
         marginHorizontal: rpx(16),
         marginBottom: rpx(24),
         flexDirection: "row",

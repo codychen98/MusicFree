@@ -9,9 +9,11 @@ import { SortType } from "@/constants/commonConst.ts";
 import pathConst from "@/constants/pathConst";
 import Config, { useAppConfig } from "@/core/appConfig";
 import lyricManager from "@/core/lyricManager";
+import { clearRemotePlaybackCache } from "@/core/remote-playback-cache/clear";
+import { getTotalCachedSize } from "@/core/remote-playback-cache/index-store";
 import {
-    getWebdavDownloadTargetSummary,
-    isWebdavDownloadTargetAvailable,
+    getRemoteDownloadTargetSummary,
+    isRemoteDownloadTargetAvailable,
 } from "@/core/webdav-download/config";
 import { useI18N } from "@/core/i18n";
 import { ROUTE_PATH, useNavigate } from "@/core/router";
@@ -89,6 +91,7 @@ function useCacheSize() {
         music: 0,
         lyric: 0,
         image: 0,
+        remotePlayback: 0,
     });
 
     const refreshCacheSize = useCallback(async () => {
@@ -101,6 +104,7 @@ function useCacheSize() {
             music: musicCache,
             lyric: lyricCache,
             image: imageCache,
+            remotePlayback: getTotalCachedSize(),
         });
     }, []);
 
@@ -117,11 +121,18 @@ export default function BasicSetting() {
     const clickMusicInAlbum = useAppConfig("basic.clickMusicInAlbum");
     const downloadPath = useAppConfig("basic.downloadPath");
     const downloadDestination = useAppConfig("basic.downloadDestination");
+    const remoteMusicPath = useAppConfig("backup.remote.musicPath");
     const notInterrupt = useAppConfig("basic.notInterrupt");
     const tempRemoteDuck = useAppConfig("basic.tempRemoteDuck");
     const tempRemoteDuckVolume = useAppConfig("basic.tempRemoteDuckVolume");
     const autoStopWhenError = useAppConfig("basic.autoStopWhenError");
     const maxCacheSize = useAppConfig("basic.maxCacheSize");
+    const remotePlaybackCacheEnabled = useAppConfig(
+        "basic.remotePlaybackCacheEnabled",
+    );
+    const autoCachePlayedRemoteMusic = useAppConfig(
+        "basic.autoCachePlayedRemoteMusic",
+    );
     const defaultPlayQuality = useAppConfig("basic.defaultPlayQuality");
     const playQualityOrder = useAppConfig("basic.playQualityOrder");
     const defaultDownloadQuality = useAppConfig("basic.defaultDownloadQuality");
@@ -161,7 +172,7 @@ export default function BasicSetting() {
             right: (
                 <ThemeText style={styles.centerText}>
                     {destination === "webdav"
-                        ? t("basicSettings.downloadDestination.webdav")
+                        ? t("basicSettings.downloadDestination.remote")
                         : t("basicSettings.downloadDestination.local")}
                 </ThemeText>
             ),
@@ -174,18 +185,18 @@ export default function BasicSetting() {
                             value: "local",
                         },
                         {
-                            label: t("basicSettings.downloadDestination.webdav"),
+                            label: t("basicSettings.downloadDestination.remote"),
                             value: "webdav",
                         },
                     ],
                     onOk(val: "local" | "webdav") {
                         if (
                             val === "webdav" &&
-                            !isWebdavDownloadTargetAvailable()
+                            !isRemoteDownloadTargetAvailable()
                         ) {
                             Toast.warn(
                                 t(
-                                    "basicSettings.downloadDestination.webdavUnavailable",
+                                    "basicSettings.downloadDestination.remoteUnavailable",
                                 ),
                             );
                             return;
@@ -237,18 +248,18 @@ export default function BasicSetting() {
             ];
         }
 
-        const summary = getWebdavDownloadTargetSummary();
+        const summary = getRemoteDownloadTargetSummary();
         const pathLabel = summary.available
             ? summary.searchPathSegment ||
-              t("basicSettings.downloadDestination.webdavPathUnset")
-            : t("basicSettings.downloadDestination.webdavUnavailable");
+              t("basicSettings.downloadDestination.remotePathUnset")
+            : t("basicSettings.downloadDestination.remoteUnavailable");
 
         return [
             destinationRow,
             {
-                title: t("basicSettings.downloadDestination.webdavFolder"),
+                title: t("basicSettings.downloadDestination.remoteFolder"),
                 description: t(
-                    "basicSettings.downloadDestination.webdavPluginListHint",
+                    "basicSettings.downloadDestination.remoteListHint",
                 ),
                 right: (
                     <ThemeText
@@ -258,9 +269,34 @@ export default function BasicSetting() {
                         {pathLabel}
                     </ThemeText>
                 ),
+                onPress() {
+                    showPanel("SetUserVariables", {
+                        title: t("basicSettings.downloadDestination.remoteFolder"),
+                        initValues: { musicPath: remoteMusicPath ?? "" },
+                        variables: [
+                            {
+                                key: "musicPath",
+                                name: t(
+                                    "basicSettings.downloadDestination.remoteFolder",
+                                ),
+                                hint: t(
+                                    "basicSettings.downloadDestination.remoteListHint",
+                                ),
+                            },
+                        ],
+                        onOk(values, closePanel) {
+                            Config.setConfig(
+                                "backup.remote.musicPath",
+                                values?.musicPath ?? "",
+                            );
+                            Toast.success(t("toast.saveSuccess"));
+                            closePanel();
+                        },
+                    });
+                },
             },
         ];
-    }, [downloadDestination, downloadPath, navigate, t]);
+    }, [downloadDestination, downloadPath, navigate, remoteMusicPath, t]);
 
     const basicOptions = [
         {
@@ -590,6 +626,37 @@ export default function BasicSetting() {
                             async onOk() {
                                 await clearCache("image");
                                 Toast.success(t("toast.imageCacheCleared"));
+                                refreshCacheSize();
+                            },
+                        });
+                    },
+                },
+                createSwitch(
+                    t("basicSettings.cache.remotePlaybackCacheEnabled"),
+                    "basic.remotePlaybackCacheEnabled",
+                    remotePlaybackCacheEnabled ?? true,
+                ),
+                createSwitch(
+                    t("basicSettings.cache.autoCachePlayedRemoteMusic"),
+                    "basic.autoCachePlayedRemoteMusic",
+                    autoCachePlayedRemoteMusic ?? true,
+                ),
+                {
+                    title: t("basicSettings.cache.clearRemotePlaybackCache"),
+                    right: (
+                        <ThemeText style={styles.centerText}>
+                            {sizeFormatter(cacheSize.remotePlayback)}
+                        </ThemeText>
+                    ),
+                    onPress() {
+                        showDialog("SimpleDialog", {
+                            title: t("dialog.clearRemotePlaybackCacheTitle"),
+                            content: t("dialog.clearRemotePlaybackCacheContent"),
+                            async onOk() {
+                                await clearRemotePlaybackCache();
+                                Toast.success(
+                                    t("toast.remotePlaybackCacheCleared"),
+                                );
                                 refreshCacheSize();
                             },
                         });

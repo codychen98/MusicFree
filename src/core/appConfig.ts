@@ -2,11 +2,39 @@ import { useMMKVObject } from "react-native-mmkv";
 
 import { getStorage, removeStorage } from "@/utils/storage";
 import getOrCreateMMKV from "@/utils/getOrCreateMMKV.ts";
+import { buildLegacyRemoteConfigMigration } from "@/core/remote-storage/migrate-legacy-config";
+import {
+    normalizeRemoteConfigPatch,
+    REMOTE_MUSIC_PLUGIN_PLATFORM,
+    type RemoteConfigSnapshot,
+} from "@/core/remote-storage/remote-config";
+import pluginMeta from "@/core/pluginManager/meta";
 
 import type { AppConfigPropertyKey, IAppConfig, IAppConfigProperties } from "@/types/core/config";
 import { safeStringify } from "@/utils/jsonUtil";
 
 const configStore = getOrCreateMMKV("App.config");
+
+const REMOTE_CONFIG_KEYS = new Set<AppConfigPropertyKey>([
+    "backup.webdav.url",
+    "backup.webdav.rootPath",
+    "backup.webdav.username",
+    "backup.webdav.password",
+    "backup.remote.musicPath",
+    "backup.remote.pcloud.hostname",
+    "backup.remote.pcloud.tokenJson",
+    "backup.remote.autoSync",
+    "backup.remote.pendingPush",
+    "backup.remote.lastSuccessfulPushAt",
+    "backup.remote.backupSourceDeviceId",
+    "webdav.url",
+    "webdav.username",
+    "webdav.password",
+    "webdav.autoSync",
+    "webdav.pendingPush",
+    "webdav.lastSuccessfulPushAt",
+    "webdav.backupSourceDeviceId",
+]);
 
 class AppConfig implements IAppConfig {
     // 迁移函数
@@ -181,6 +209,76 @@ class AppConfig implements IAppConfig {
             }
             configStore.set("$schema", "4");
         }
+
+        if (schemaVersion < 5) {
+            const rawKeys = new Set(
+                configStore
+                    .getAllKeys()
+                    .filter((key) => key !== "$schema"),
+            );
+            const snapshot = this.getConfigSnapshot(rawKeys);
+            const { patch, migrated } = buildLegacyRemoteConfigMigration(
+                snapshot,
+                {
+                    rawKeys,
+                    pluginUserVariables: pluginMeta.getUserVariables(
+                        REMOTE_MUSIC_PLUGIN_PLATFORM,
+                    ),
+                },
+            );
+            if (migrated) {
+                for (const [key, value] of Object.entries(patch)) {
+                    configStore.set(key, safeStringify(value));
+                }
+            }
+            if (!configStore.contains("backup.remote.pcloud.hostname")) {
+                configStore.set(
+                    "backup.remote.pcloud.hostname",
+                    safeStringify("api.pcloud.com"),
+                );
+            }
+            if (!configStore.contains("basic.autoCachePlayedRemoteMusic")) {
+                configStore.set(
+                    "basic.autoCachePlayedRemoteMusic",
+                    safeStringify(true),
+                );
+            }
+            if (!configStore.contains("basic.remotePlaybackCacheEnabled")) {
+                configStore.set(
+                    "basic.remotePlaybackCacheEnabled",
+                    safeStringify(true),
+                );
+            }
+            configStore.set("$schema", "5");
+        }
+    }
+
+    private getConfigSnapshot(rawKeys: ReadonlySet<string>): RemoteConfigSnapshot {
+        const snapshot: RemoteConfigSnapshot = {};
+        for (const key of rawKeys) {
+            const value = configStore.getString(key);
+            if (value !== undefined) {
+                snapshot[key] = JSON.parse(value);
+            }
+        }
+        return snapshot;
+    }
+
+    private applyConfigValue<K extends keyof IAppConfigProperties>(
+        key: K,
+        value?: IAppConfigProperties[K],
+    ): void {
+        if (value === undefined) {
+            configStore.delete(key);
+        } else {
+            configStore.set(key, safeStringify(value));
+        }
+        if (key === "webdav.autoSync" && value === false) {
+            configStore.delete("webdav.pendingPush");
+        }
+        if (key === "backup.remote.autoSync" && value === false) {
+            configStore.delete("backup.remote.pendingPush");
+        }
     }
 
     async setup(): Promise<void> {
@@ -191,14 +289,17 @@ class AppConfig implements IAppConfig {
         key: K,
         value?: IAppConfigProperties[K] | undefined,
     ): void {
-        if (value === undefined) {
-            configStore.delete(key);
-        } else {
-            configStore.set(key, safeStringify(value));
+        if (REMOTE_CONFIG_KEYS.has(key)) {
+            const normalized = normalizeRemoteConfigPatch({ [key]: value });
+            for (const [patchKey, patchValue] of Object.entries(normalized)) {
+                this.applyConfigValue(
+                    patchKey as K,
+                    patchValue as IAppConfigProperties[K],
+                );
+            }
+            return;
         }
-        if (key === "webdav.autoSync" && value === false) {
-            configStore.delete("webdav.pendingPush");
-        }
+        this.applyConfigValue(key, value);
     }
 
     getConfig<K extends keyof IAppConfigProperties>(

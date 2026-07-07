@@ -20,8 +20,11 @@ import { useEffect, useState } from "react";
 import { ToastAndroid } from "react-native";
 import { copyFile, readDir, readFile, unlink, writeFile } from "react-native-fs";
 import { devLog, errorLog, trace } from "../../utils/log";
+import { REMOTE_MUSIC_PLUGIN_HASH, REMOTE_MUSIC_PLUGIN_PLATFORM } from "@/core/remote-storage/remote-config";
+import { isRemoteMusicAvailable } from "@/core/webdav-download/config";
 import pluginMeta from "./meta";
 import { localFilePlugin, Plugin, PluginState } from "./plugin";
+import remoteMusicPlugin from "./remoteMusicPlugin";
 import i18n from "../i18n";
 import getOrCreateMMKV from "@/utils/getOrCreateMMKV";
 import { safeParse } from "@/utils/jsonUtil";
@@ -456,15 +459,37 @@ class PluginManager implements IPluginManager, IInjectable {
         return this.getByName(mediaItem?.platform);
     }
 
+    private isInstalledRemoteMusicPlugin(plugin: Plugin): boolean {
+        return plugin.name === REMOTE_MUSIC_PLUGIN_PLATFORM;
+    }
+
+    private withBuiltinRemoteMusicPlugin(plugins: Plugin[]): Plugin[] {
+        const withoutInstalledWebdav = plugins.filter(
+            plugin => !this.isInstalledRemoteMusicPlugin(plugin),
+        );
+        if (!isRemoteMusicAvailable()) {
+            return withoutInstalledWebdav;
+        }
+        return [remoteMusicPlugin, ...withoutInstalledWebdav];
+    }
+
     /**
      * 通过名称获取插件
      * @param name - 要查找的插件名称
      * @returns 匹配名称的插件实例或本地文件插件
      */
     getByName(name: string) {
-        return name === localPluginPlatform
-            ? localFilePlugin
-            : this.getPlugins().find(_ => _.name === name);
+        if (name === localPluginPlatform) {
+            return localFilePlugin;
+        }
+        if (name === REMOTE_MUSIC_PLUGIN_PLATFORM) {
+            return remoteMusicPlugin;
+        }
+        const plugin = this.getPlugins().find(_ => _.name === name);
+        if (plugin && this.isInstalledRemoteMusicPlugin(plugin)) {
+            return remoteMusicPlugin;
+        }
+        return plugin;
     }
 
     /**
@@ -473,9 +498,17 @@ class PluginManager implements IPluginManager, IInjectable {
      * @returns 匹配哈希的插件实例或本地文件插件
      */
     getByHash(hash: string) {
-        return hash === localPluginHash
-            ? localFilePlugin
-            : this.getPlugins().find(_ => _.hash === hash);
+        if (hash === localPluginHash) {
+            return localFilePlugin;
+        }
+        if (hash === REMOTE_MUSIC_PLUGIN_HASH) {
+            return remoteMusicPlugin;
+        }
+        const plugin = this.getPlugins().find(_ => _.hash === hash);
+        if (plugin && this.isInstalledRemoteMusicPlugin(plugin)) {
+            return remoteMusicPlugin;
+        }
+        return plugin;
     }
 
     /**
@@ -507,15 +540,17 @@ class PluginManager implements IPluginManager, IInjectable {
      * @returns 可搜索的插件实例数组
      */
     getSearchablePlugins(supportedSearchType?: ICommon.SupportMediaType) {
-        return this.getPlugins().filter(
-            it =>
-                pluginMeta.isPluginEnabled(it.name) &&
-                it.supportedMethods.has("search") &&
-                (supportedSearchType && it.instance.supportedSearchType
-                    ? it.instance.supportedSearchType.includes(
-                        supportedSearchType,
-                    )
-                    : true),
+        return this.withBuiltinRemoteMusicPlugin(
+            this.getPlugins().filter(
+                it =>
+                    pluginMeta.isPluginEnabled(it.name) &&
+                    it.supportedMethods.has("search") &&
+                    (supportedSearchType && it.instance.supportedSearchType
+                        ? it.instance.supportedSearchType.includes(
+                            supportedSearchType,
+                        )
+                        : true),
+            ),
         );
     }
 
@@ -540,11 +575,15 @@ class PluginManager implements IPluginManager, IInjectable {
      * @returns 具有指定功能的插件实例数组
      */
     getPluginsWithAbility(ability: keyof IPlugin.IPluginInstanceMethods) {
-        return this.getPlugins().filter(
+        const plugins = this.getPlugins().filter(
             it =>
                 pluginMeta.isPluginEnabled(it.name) &&
                 it.supportedMethods.has(ability),
         );
+        if (ability === "getTopLists" || ability === "search") {
+            return this.withBuiltinRemoteMusicPlugin(plugins);
+        }
+        return plugins;
     }
 
     /**

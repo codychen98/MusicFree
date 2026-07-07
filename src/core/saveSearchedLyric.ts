@@ -5,7 +5,7 @@ import { WEBDAV_MUSIC_PLUGIN_PLATFORM } from "@/core/webdav-download/config";
 import {
     uploadRemoteSidecarLyrics,
 } from "@/core/webdav-download/sidecar";
-import { WebdavMusicPluginConfigIncompleteError } from "@/core/webdav-download/upload";
+import { RemoteMusicConfigIncompleteError } from "@/core/webdav-download/upload";
 import { localSidecarPathsForAudio } from "@/utils/renameDownloadPath";
 import { getLocalPath } from "@/utils/mediaUtils";
 import { getMediaExtraProperty } from "@/utils/mediaExtra";
@@ -74,7 +74,7 @@ async function saveToWebdavSidecar(
             translation,
         });
     } catch (e: unknown) {
-        if (e instanceof WebdavMusicPluginConfigIncompleteError) {
+        if (e instanceof RemoteMusicConfigIncompleteError) {
             throw new SaveSearchedLyricError(
                 SaveSearchedLyricErrorCode.WEBDAV_CONFIG_INCOMPLETE,
             );

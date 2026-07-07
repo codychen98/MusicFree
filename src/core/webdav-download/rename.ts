@@ -1,36 +1,12 @@
 import { errorLog } from "@/utils/log";
-import { AuthType, createClient, type WebDAVClient } from "webdav";
+import type { RemoteStorageClient } from "@/core/remote-storage/types";
 
 import { remotePathsForWebdavTrack } from "./path";
-import {
-    getWebdavMusicPluginConfig,
-    type WebdavMusicPluginConfig,
-} from "./upload";
-
-export interface RenameWebdavRemoteTrackInput {
-    oldRemoteAudioPath: string;
-    newRemoteAudioPath: string;
-}
-
-let cachedClient: WebDAVClient | null = null;
-let cachedClientKey = "";
-
-function getWebdavMusicClient(config: WebdavMusicPluginConfig): WebDAVClient {
-    const key = `${config.url}\0${config.username}\0${config.password}`;
-    if (cachedClient && cachedClientKey === key) {
-        return cachedClient;
-    }
-    cachedClient = createClient(config.url, {
-        authType: AuthType.Password,
-        username: config.username,
-        password: config.password,
-    });
-    cachedClientKey = key;
-    return cachedClient;
-}
+import type { RenameWebdavRemoteTrackInput } from "./types";
+import { getRemoteMusicClient } from "./upload";
 
 async function assertRenameTargetsAvailable(
-    client: WebDAVClient,
+    client: RemoteStorageClient,
     oldPaths: ReturnType<typeof remotePathsForWebdavTrack>,
     newPaths: ReturnType<typeof remotePathsForWebdavTrack>,
 ): Promise<void> {
@@ -52,14 +28,14 @@ async function assertRenameTargetsAvailable(
 }
 
 async function moveRemoteFileIfExists(
-    client: WebDAVClient,
+    client: RemoteStorageClient,
     oldPath: string,
     newPath: string,
 ): Promise<void> {
     if (!(await client.exists(oldPath))) {
         return;
     }
-    await client.moveFile(oldPath, newPath, { overwrite: false });
+    await client.moveFile(oldPath, newPath);
 }
 
 export async function renameWebdavRemoteTrack(
@@ -75,8 +51,7 @@ export async function renameWebdavRemoteTrack(
         return;
     }
 
-    const config = getWebdavMusicPluginConfig();
-    const client = getWebdavMusicClient(config);
+    const client = getRemoteMusicClient();
     const oldPaths = remotePathsForWebdavTrack(oldRemoteAudioPath);
     const newPaths = remotePathsForWebdavTrack(newRemoteAudioPath);
 
@@ -87,9 +62,7 @@ export async function renameWebdavRemoteTrack(
     await assertRenameTargetsAvailable(client, oldPaths, newPaths);
 
     try {
-        await client.moveFile(oldPaths.audioPath, newPaths.audioPath, {
-            overwrite: false,
-        });
+        await client.moveFile(oldPaths.audioPath, newPaths.audioPath);
         await moveRemoteFileIfExists(client, oldPaths.lrcPath, newPaths.lrcPath);
         await moveRemoteFileIfExists(
             client,
@@ -97,7 +70,7 @@ export async function renameWebdavRemoteTrack(
             newPaths.tranLrcPath,
         );
     } catch (e: unknown) {
-        errorLog("WebDAV-重命名远程歌曲失败", {
+        errorLog("Remote-重命名远程歌曲失败", {
             oldRemoteAudioPath,
             newRemoteAudioPath,
             reason: e instanceof Error ? e.message : e,

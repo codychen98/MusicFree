@@ -6,7 +6,22 @@ import PluginManager from "./pluginManager";
 import MusicSheet from "@/core/musicSheet";
 import { ResumeMode } from "@/constants/commonConst.ts";
 import Config from "./appConfig";
+import {
+    getRemoteBackupSourceDeviceId,
+    type RemoteConfigSnapshot,
+} from "@/core/remote-storage/remote-config";
 import { runWithoutWebdavSyncNotify } from "@/core/webdav-sync/suppress";
+
+function readBackupSourceDeviceConfigSnapshot(): RemoteConfigSnapshot {
+    return {
+        "backup.remote.backupSourceDeviceId": Config.getConfig(
+            "backup.remote.backupSourceDeviceId",
+        ),
+        "webdav.backupSourceDeviceId": Config.getConfig(
+            "webdav.backupSourceDeviceId",
+        ),
+    };
+}
 
 /**
  * 结果：一份大的json文件
@@ -52,12 +67,14 @@ function backup() {
     return JSON.stringify(buildBackupPayload());
 }
 
-/** Full JSON written to WebDAV: base payload plus syncMeta bump (parity with Desktop D2). */
+/** Full JSON written to remote backup: base payload plus syncMeta bump (parity with Desktop D2). */
 function stringifyWebdavBackupWithSyncMeta(): string {
-    let sourceDeviceId = Config.getConfig("webdav.backupSourceDeviceId");
+    let sourceDeviceId = getRemoteBackupSourceDeviceId(
+        readBackupSourceDeviceConfigSnapshot(),
+    );
     if (!sourceDeviceId) {
         sourceDeviceId = nanoid();
-        Config.setConfig("webdav.backupSourceDeviceId", sourceDeviceId);
+        Config.setConfig("backup.remote.backupSourceDeviceId", sourceDeviceId);
     }
     const syncMeta: IBackupSyncMeta = {
         updatedAt: Date.now(),

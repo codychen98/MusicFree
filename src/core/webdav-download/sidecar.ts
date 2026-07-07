@@ -1,51 +1,24 @@
+import {
+    getRemoteTextForPlayback,
+    remoteExistsForPlayback,
+} from "@/core/remote-storage/playback-client";
 import { errorLog } from "@/utils/log";
-import { AuthType, createClient, type WebDAVClient } from "webdav";
 
 import { remotePathsForWebdavTrack } from "./path";
-import {
-    getWebdavMusicPluginConfig,
-    type WebdavMusicPluginConfig,
-} from "./upload";
-
-export interface FetchRemoteSidecarLyricsResult {
-    rawLrc?: string;
-    translation?: string;
-}
-
-export interface UploadRemoteSidecarLyricsInput {
-    remoteAudioPath: string;
-    rawLrc: string;
-    translation?: string;
-}
-
-let cachedClient: WebDAVClient | null = null;
-let cachedClientKey = "";
-
-function getWebdavMusicClient(config: WebdavMusicPluginConfig): WebDAVClient {
-    const key = `${config.url}\0${config.username}\0${config.password}`;
-    if (cachedClient && cachedClientKey === key) {
-        return cachedClient;
-    }
-    cachedClient = createClient(config.url, {
-        authType: AuthType.Password,
-        username: config.username,
-        password: config.password,
-    });
-    cachedClientKey = key;
-    return cachedClient;
-}
+import type {
+    FetchRemoteSidecarLyricsResult,
+    UploadRemoteSidecarLyricsInput,
+} from "./types";
+import { getRemoteMusicClient } from "./upload";
 
 async function readRemoteTextIfExists(
-    client: WebDAVClient,
     remotePath: string,
 ): Promise<string | undefined> {
-    if (!(await client.exists(remotePath))) {
+    if (!(await remoteExistsForPlayback(remotePath))) {
         return undefined;
     }
-    const contents = await client.getFileContents(remotePath, {
-        format: "text",
-    });
-    if (typeof contents !== "string" || !contents.trim()) {
+    const contents = await getRemoteTextForPlayback(remotePath);
+    if (!contents.trim()) {
         return undefined;
     }
     return contents;
@@ -59,22 +32,17 @@ export async function fetchRemoteSidecarLyrics(
         return {};
     }
 
-    const config = getWebdavMusicPluginConfig();
-    const client = getWebdavMusicClient(config);
     const paths = remotePathsForWebdavTrack(normalizedPath);
 
     try {
-        const rawLrc = await readRemoteTextIfExists(client, paths.lrcPath);
-        const translation = await readRemoteTextIfExists(
-            client,
-            paths.tranLrcPath,
-        );
+        const rawLrc = await readRemoteTextIfExists(paths.lrcPath);
+        const translation = await readRemoteTextIfExists(paths.tranLrcPath);
         return {
             ...(rawLrc !== undefined ? { rawLrc } : {}),
             ...(translation !== undefined ? { translation } : {}),
         };
     } catch (e: unknown) {
-        errorLog("WebDAV-读取远程歌词失败", {
+        errorLog("Remote-读取远程歌词失败", {
             remoteAudioPath: normalizedPath,
             reason: e instanceof Error ? e.message : e,
         });
@@ -94,26 +62,26 @@ export async function uploadRemoteSidecarLyrics(
         throw new Error("LYRIC_EMPTY");
     }
 
-    const config = getWebdavMusicPluginConfig();
-    const client = getWebdavMusicClient(config);
+    const client = getRemoteMusicClient();
     const paths = remotePathsForWebdavTrack(remoteAudioPath);
 
     try {
-        await client.putFileContents(paths.lrcPath, rawLrc, {
-            overwrite: true,
-        });
+        await client.putText(paths.lrcPath, rawLrc);
 
         const translation = input.translation?.trim();
         if (translation) {
-            await client.putFileContents(paths.tranLrcPath, translation, {
-                overwrite: true,
-            });
+            await client.putText(paths.tranLrcPath, translation);
         }
     } catch (e: unknown) {
-        errorLog("WebDAV-上传远程歌词失败", {
+        errorLog("Remote-上传远程歌词失败", {
             remoteAudioPath,
             reason: e instanceof Error ? e.message : e,
         });
         throw e;
     }
 }
+
+export type {
+    FetchRemoteSidecarLyricsResult,
+    UploadRemoteSidecarLyricsInput,
+} from "./types";

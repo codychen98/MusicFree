@@ -1,121 +1,139 @@
 import Backup from "@/core/backup";
-import Config from "@/core/appConfig";
 import getOrCreateMMKV from "@/utils/getOrCreateMMKV";
-import { AuthType, createClient } from "webdav";
-import {
-    isWebdavAutoSyncEnabled,
-    isWebdavCredentialsComplete,
-    recordWebdavUploadSuccess,
-    setWebdavPendingPush,
-} from "./config";
+import { LEGACY_REMOTE_BACKUP_FILE } from "@/core/remote-storage/remote-paths";
+import { RemoteCredentialsIncompleteError } from "@/core/remote-storage/types";
+
 import { registerWebdavMark } from "./bridge";
+import {
+    isRemoteAutoSyncEnabled,
+    isRemoteCredentialsComplete,
+    isRemotePendingPush,
+    recordRemoteUploadSuccess,
+    setRemotePendingPush,
+} from "./config";
+import { getActiveRemoteBackupPaths, getActiveRemoteStorageClient } from "./remote-client";
 import { isWebdavNotifySuppressed } from "./suppress";
 
-export class WebdavCredentialsIncompleteError extends Error {
+export { RemoteCredentialsIncompleteError };
+
+/** @deprecated Use RemoteCredentialsIncompleteError */
+export class WebdavCredentialsIncompleteError extends RemoteCredentialsIncompleteError {
     constructor() {
-        super("WEBDAV_CREDENTIALS_INCOMPLETE");
+        super();
         this.name = "WebdavCredentialsIncompleteError";
     }
 }
 
 const UPLOAD_DEBOUNCE_MS = 3000;
-const WEBDAV_BACKUP_DIR = "/MusicFree";
 
-/** Canonical remote backup path (parity with Desktop / Android Settings WebDAV restore). */
-export const WEBDAV_REMOTE_BACKUP_FILE = "/MusicFree/MusicFreeBackup.json";
+/** Canonical remote backup path (parity with Desktop / Android Settings remote restore). */
+export const WEBDAV_REMOTE_BACKUP_FILE = LEGACY_REMOTE_BACKUP_FILE;
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let setupListenersDone = false;
 
-function webdavMarkAfterLocalChange(): void {
-    if (isWebdavNotifySuppressed() || !isWebdavAutoSyncEnabled()) {
+function remoteMarkAfterLocalChange(): void {
+    if (isWebdavNotifySuppressed() || !isRemoteAutoSyncEnabled()) {
         return;
     }
-    setWebdavPendingPush(true);
-    scheduleDebouncedWebdavUpload();
+    setRemotePendingPush(true);
+    scheduleDebouncedRemoteUpload();
 }
 
-registerWebdavMark(webdavMarkAfterLocalChange);
+registerWebdavMark(remoteMarkAfterLocalChange);
 
-export async function uploadBackupToWebdav(): Promise<void> {
-    const url = Config.getConfig("webdav.url");
-    const username = Config.getConfig("webdav.username");
-    const password = Config.getConfig("webdav.password");
-    if (!url || !username || !password) {
-        throw new WebdavCredentialsIncompleteError();
+export async function uploadBackupToRemote(): Promise<void> {
+    if (!isRemoteCredentialsComplete()) {
+        throw new RemoteCredentialsIncompleteError();
     }
-    const client = createClient(url, {
-        authType: AuthType.Password,
-        username,
-        password,
-    });
+    const client = getActiveRemoteStorageClient();
+    const paths = getActiveRemoteBackupPaths();
     const raw = Backup.stringifyWebdavBackupWithSyncMeta();
-    if (!(await client.exists(WEBDAV_BACKUP_DIR))) {
-        await client.createDirectory(WEBDAV_BACKUP_DIR);
-    }
-    await client.putFileContents(WEBDAV_REMOTE_BACKUP_FILE, raw, {
-        overwrite: true,
-    });
+    await client.ensureDir(paths.dir);
+    await client.putText(paths.file, raw);
 }
 
-export async function flushWebdavUpload(): Promise<boolean> {
-    if (!isWebdavAutoSyncEnabled() || !isWebdavCredentialsComplete()) {
+/** @deprecated Use uploadBackupToRemote */
+export const uploadBackupToWebdav = uploadBackupToRemote;
+
+export async function flushRemoteUpload(): Promise<boolean> {
+    if (!isRemoteAutoSyncEnabled() || !isRemoteCredentialsComplete()) {
         return false;
     }
     try {
-        await uploadBackupToWebdav();
-        recordWebdavUploadSuccess();
+        await uploadBackupToRemote();
+        recordRemoteUploadSuccess();
         return true;
     } catch {
-        setWebdavPendingPush(true);
+        setRemotePendingPush(true);
         return false;
     }
 }
 
-function debouncedFlushWebdavUpload(): void {
+/** @deprecated Use flushRemoteUpload */
+export const flushWebdavUpload = flushRemoteUpload;
+
+function debouncedFlushRemoteUpload(): void {
     if (debounceTimer !== null) {
         clearTimeout(debounceTimer);
     }
     debounceTimer = setTimeout(() => {
         debounceTimer = null;
-        void flushWebdavUpload();
+        void flushRemoteUpload();
     }, UPLOAD_DEBOUNCE_MS);
 }
 
-export function scheduleDebouncedWebdavUpload(): void {
-    if (!isWebdavAutoSyncEnabled() || !isWebdavCredentialsComplete()) {
+export function scheduleDebouncedRemoteUpload(): void {
+    if (!isRemoteAutoSyncEnabled() || !isRemoteCredentialsComplete()) {
         return;
     }
-    debouncedFlushWebdavUpload();
+    debouncedFlushRemoteUpload();
 }
 
-export function cancelScheduledWebdavUpload(): void {
+/** @deprecated Use scheduleDebouncedRemoteUpload */
+export const scheduleDebouncedWebdavUpload = scheduleDebouncedRemoteUpload;
+
+export function cancelScheduledRemoteUpload(): void {
     if (debounceTimer !== null) {
         clearTimeout(debounceTimer);
         debounceTimer = null;
     }
 }
 
-export function setupWebdavAutoSync(): void {
+/** @deprecated Use cancelScheduledRemoteUpload */
+export const cancelScheduledWebdavUpload = cancelScheduledRemoteUpload;
+
+const REMOTE_CREDENTIAL_KEYS = new Set([
+    "backup.webdav.url",
+    "backup.webdav.username",
+    "backup.webdav.password",
+    "backup.remote.pcloud.hostname",
+    "backup.remote.pcloud.tokenJson",
+    "backup.remote.autoSync",
+    "webdav.url",
+    "webdav.username",
+    "webdav.password",
+    "webdav.autoSync",
+]);
+
+export function setupRemoteAutoSync(): void {
     if (setupListenersDone) {
         return;
     }
     setupListenersDone = true;
     const configStore = getOrCreateMMKV("App.config");
     configStore.addOnValueChangedListener(changedKey => {
-        if (!isWebdavAutoSyncEnabled()) {
+        if (!isRemoteAutoSyncEnabled()) {
             return;
         }
-        const credentialsOrAutoTouched =
-            changedKey === "webdav.url" ||
-            changedKey === "webdav.username" ||
-            changedKey === "webdav.password" ||
-            changedKey === "webdav.autoSync";
-        if (!credentialsOrAutoTouched) {
+        if (!REMOTE_CREDENTIAL_KEYS.has(changedKey)) {
             return;
         }
-        if (Config.getConfig("webdav.pendingPush") === true) {
-            scheduleDebouncedWebdavUpload();
+        if (isRemotePendingPush()) {
+            scheduleDebouncedRemoteUpload();
         }
     });
 }
+
+/** @deprecated Use setupRemoteAutoSync */
+export const setupWebdavAutoSync = setupRemoteAutoSync;

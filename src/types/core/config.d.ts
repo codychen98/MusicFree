@@ -33,6 +33,10 @@ export interface IAppConfigProperties {
     "basic.showExitOnNotification": boolean;
     "basic.musicOrderInLocalSheet": SortType;
     "basic.tryChangeSourceWhenPlayFail": boolean;
+    /** Background cache remote tracks after successful online play. */
+    "basic.autoCachePlayedRemoteMusic": boolean;
+    /** Master toggle for offline remote playback file cache reads. */
+    "basic.remotePlaybackCacheEnabled": boolean;
 
     // Lyric
     "lyric.showStatusBarLyric": boolean;
@@ -61,17 +65,27 @@ export interface IAppConfigProperties {
 
     // Backup
     "backup.resumeMode": ResumeMode;
+    "backup.webdav.url": string;
+    "backup.webdav.rootPath": string;
+    "backup.webdav.username": string;
+    "backup.webdav.password": string;
+    "backup.remote.musicPath": string;
+    "backup.remote.pcloud.hostname": string;
+    "backup.remote.pcloud.tokenJson": string;
+    "backup.remote.autoSync": boolean;
+    "backup.remote.pendingPush": boolean;
+    "backup.remote.lastSuccessfulPushAt"?: number;
+    "backup.remote.backupSourceDeviceId"?: string;
 
     // Plugin
     "plugin.subscribeUrl": string;
 
-    // WebDAV
+    // WebDAV (legacy; read shim only — migrate to backup.webdav.* / backup.remote.*)
     "webdav.url": string;
     "webdav.username": string;
     "webdav.password": string;
-    /** Desktop `backup.webdav.autoSync`; default absent/false until user enables sync UI (later steps). */
     "webdav.autoSync": boolean;
-    /** Dirty local snapshot not yet reflected on WebDAV (autosync parity with Desktop `backup.webdav.pendingPush`). */
+    /** Dirty local snapshot not yet reflected on remote storage. */
     "webdav.pendingPush": boolean;
     "webdav.lastSuccessfulPushAt"?: number;
     /** Stable id per install; written on first WebDAV upload that attaches syncMeta. */

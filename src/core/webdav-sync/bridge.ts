@@ -4,7 +4,12 @@ export function registerWebdavMark(fn: () => void): void {
     markImpl = fn;
 }
 
-/** Called by music sheet / plugin code; bound in `upload.ts` at module load after `suppress` resolves. */
-export function markWebdavLocalMutation(): void {
+/** Called by music sheet / plugin code when local playlists change. */
+export function markRemoteBackupMutation(): void {
     markImpl?.();
+}
+
+/** @deprecated Use markRemoteBackupMutation */
+export function markWebdavLocalMutation(): void {
+    markRemoteBackupMutation();
 }

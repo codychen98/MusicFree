@@ -28,6 +28,7 @@ import { URL } from "react-native-url-polyfill";
 import * as webdav from "webdav";
 import { devLog, errorLog, lyricLog, trace } from "../../utils/log";
 import Network from "../../utils/network";
+import { getCachedLyrics } from "@/core/remote-playback-cache/lookup";
 import { WEBDAV_MUSIC_PLUGIN_PLATFORM } from "@/core/webdav-download/config";
 import { fetchRemoteSidecarLyrics } from "@/core/webdav-download/sidecar";
 import MediaCache from "../mediaCache";
@@ -361,6 +362,27 @@ class PluginMethodsWrapper implements IPlugin.IPluginInstanceMethods {
         });
 
         if (originalMusicItem.platform === WEBDAV_MUSIC_PLUGIN_PLATFORM) {
+            try {
+                const cached = await getCachedLyrics(originalMusicItem.id);
+                if (cached && (cached.rawLrc || cached.translation)) {
+                    let rawLrc = cached.rawLrc;
+                    let translation = cached.translation;
+                    if (!rawLrc) {
+                        rawLrc = translation;
+                        translation = undefined;
+                    }
+                    lyricLog("plugin.getLyric:return", {
+                        source: "remotePlaybackCache",
+                        rawLrcLen: rawLrc?.length ?? 0,
+                    });
+                    return {
+                        rawLrc,
+                        translation,
+                    };
+                }
+            } catch {
+                // Cached sidecar unavailable or unreadable; fall through to remote.
+            }
             try {
                 const sidecar = await fetchRemoteSidecarLyrics(originalMusicItem.id);
                 if (sidecar.rawLrc || sidecar.translation) {

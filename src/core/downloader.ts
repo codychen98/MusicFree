@@ -19,7 +19,7 @@ import { migrateTrackToWebdavSource } from "./migrateTrackToWebdavSource";
 import LocalMusicSheet from "./localMusicSheet";
 import { isWebdavDownloadTargetAvailable } from "./webdav-download/config";
 import {
-    getWebdavMusicPluginConfig,
+    getRemoteMusicConfig,
     remoteAudioExists,
     remotePathFor,
     uploadDownloadArtifacts,
@@ -437,13 +437,11 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
 
         if (useWebdavDestination) {
             try {
-                const webdavConfig = getWebdavMusicPluginConfig();
-                const remoteAudioPath = remotePathFor(
-                    webdavConfig.remoteDir,
+                const remoteCheck = await remoteAudioExists({
                     audioFilename,
-                );
-                const hasRemoteAudio = await remoteAudioExists(remoteAudioPath);
-                if (hasRemoteAudio) {
+                });
+                const remoteAudioPath = remoteCheck.remoteAudioPath;
+                if (remoteCheck.exists) {
                     await migrateTrackToWebdavSource(musicItem, {
                         remotePath: remoteAudioPath,
                         title: musicItem.title,
@@ -658,9 +656,8 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
         musicItems: IMusic.IMusicItem[],
         quality?: IMusic.IQualityKey,
     ): Promise<void> {
-        let webdavConfig: ReturnType<typeof getWebdavMusicPluginConfig>;
         try {
-            webdavConfig = getWebdavMusicPluginConfig();
+            getRemoteMusicConfig();
         } catch {
             // If config is incomplete, fall back to normal queue behavior.
             this.download(musicItems, quality);
@@ -720,12 +717,11 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
                 }
 
                 const audioFilename = `${Downloader.generateFilename(musicItem)}.${extension}`;
-                const remoteAudioPath = remotePathFor(
-                    webdavConfig.remoteDir,
+                const remoteCheck = await remoteAudioExists({
                     audioFilename,
-                );
-                const hasRemoteAudio = await remoteAudioExists(remoteAudioPath);
-                if (hasRemoteAudio) {
+                });
+                const remoteAudioPath = remoteCheck.remoteAudioPath;
+                if (remoteCheck.exists) {
                     await migrateTrackToWebdavSource(musicItem, {
                         remotePath: remoteAudioPath,
                         title: musicItem.title,

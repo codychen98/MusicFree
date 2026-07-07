@@ -4,7 +4,7 @@ import {
     RenameTrackError,
     renameMusicTrack,
 } from "@/core/renameTrack";
-import { WebdavMusicPluginConfigIncompleteError } from "@/core/webdav-download/upload";
+import { RemoteMusicConfigIncompleteError } from "@/core/webdav-download/upload";
 import { useI18N } from "@/core/i18n";
 import useColors from "@/hooks/useColors";
 import rpx, { vmax } from "@/utils/rpx";
@@ -36,9 +36,9 @@ function resolveRenameErrorMessage(
         }
     }
     if (
-        error instanceof WebdavMusicPluginConfigIncompleteError ||
+        error instanceof RemoteMusicConfigIncompleteError ||
         (error instanceof Error &&
-            error.message === "WEBDAV_MUSIC_PLUGIN_CONFIG_INCOMPLETE")
+            error.message === "REMOTE_MUSIC_CONFIG_INCOMPLETE")
     ) {
         return t("panel.renameTrack.webdavConfigIncomplete");
     }
