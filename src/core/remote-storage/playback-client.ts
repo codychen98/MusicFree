@@ -52,7 +52,7 @@ async function withPlaybackFallback<T>(
 ): Promise<T> {
     let primary: RemoteStorageClient;
     try {
-        primary = getRemoteMusicClient();
+        primary = await getRemoteMusicClient();
     } catch (primaryError) {
         if (!isWebdavPlaybackFallbackActive()) {
             throw primaryError;

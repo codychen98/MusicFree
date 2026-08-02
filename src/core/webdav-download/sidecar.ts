@@ -62,7 +62,7 @@ export async function uploadRemoteSidecarLyrics(
         throw new Error("LYRIC_EMPTY");
     }
 
-    const client = getRemoteMusicClient();
+    const client = await getRemoteMusicClient();
     const paths = remotePathsForWebdavTrack(remoteAudioPath);
 
     try {

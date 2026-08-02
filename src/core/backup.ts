@@ -2,7 +2,7 @@
 /** 歌单、插件 */
 import { compare } from "compare-versions";
 import { nanoid } from "nanoid";
-import PluginManager from "./pluginManager";
+import PluginManager, { applyPluginOrderMap } from "./pluginManager";
 import MusicSheet from "@/core/musicSheet";
 import { ResumeMode } from "@/constants/commonConst.ts";
 import Config from "./appConfig";
@@ -11,6 +11,15 @@ import {
     type RemoteConfigSnapshot,
 } from "@/core/remote-storage/remote-config";
 import { runWithoutWebdavSyncNotify } from "@/core/webdav-sync/suppress";
+import pluginMeta from "@/core/pluginManager/meta";
+import {
+    parseBackupPayload,
+    pluginOrderMapToBackupOrder,
+    type IBackupPayload,
+    type IBackupSyncMeta,
+} from "@/core/backup-parse";
+
+export type { IBackupSyncMeta, IBackupPluginOrder } from "@/core/backup-parse";
 
 function readBackupSourceDeviceConfigSnapshot(): RemoteConfigSnapshot {
     return {
@@ -28,19 +37,12 @@ function readBackupSourceDeviceConfigSnapshot(): RemoteConfigSnapshot {
  * {
  *     musicSheets: [],
  *     plugins: [],
+ *     pluginOrder?: { [platformOrName]: number },  // optional; remote-wins on pull (A3)
  *     syncMeta?: { updatedAt, sourceDeviceId }  // WebDAV uploads only; tolerated on restore
  * }
  */
 
-export interface IBackupSyncMeta {
-    updatedAt: number;
-    sourceDeviceId?: string;
-}
-
-interface IBackupJson {
-    musicSheets: IMusic.IMusicSheetItem[];
-    plugins: Array<{ srcUrl: string; version: string }>;
-}
+type IBackupJson = IBackupPayload;
 
 function buildBackupPayload(): IBackupJson {
     const musicSheets = MusicSheet.backupSheets();
@@ -57,9 +59,14 @@ function buildBackupPayload(): IBackupJson {
                 typeof p.srcUrl === "string" && p.srcUrl.length > 0,
         );
 
+    const pluginOrder = pluginOrderMapToBackupOrder(
+        pluginMeta.getPluginOrder(),
+    );
+
     return {
         musicSheets,
         plugins: normalizedPlugins,
+        ...(pluginOrder ? { pluginOrder } : {}),
     };
 }
 
@@ -102,18 +109,20 @@ async function resume(
     options?: IBackupResumeOptions,
 ) {
     return runWithoutWebdavSyncNotify(async () => {
-        let obj: IBackupJson;
-        if (typeof raw === "string") {
-            obj = JSON.parse(raw);
-        } else {
-            obj = raw as IBackupJson;
+        const obj = parseBackupPayload(
+            typeof raw === "string" ? raw : (raw as Record<string, unknown>),
+        );
+        const { plugins, musicSheets, pluginOrder } = obj;
+
+        // Remote-wins order apply (all resume paths, including WebDAV); missing = no-op.
+        if (pluginOrder) {
+            applyPluginOrderMap(pluginOrder);
         }
 
-        const { plugins, musicSheets } = obj ?? {};
-        const sheetsPayload = Array.isArray(musicSheets) ? musicSheets : [];
+        const sheetsPayload = musicSheets;
         /** 恢复插件 */
         const validPlugins = PluginManager.getEnabledPlugins();
-        const resumePlugins = plugins?.map(_ => {
+        const resumePlugins = plugins.map(_ => {
             // 校验是否安装过: 同源且本地版本更高就忽略掉
             if (
                 validPlugins.find(
@@ -136,7 +145,7 @@ async function resume(
             ? MusicSheet.resumeSheetsFullOverwrite(sheetsPayload)
             : MusicSheet.resumeSheets(sheetsPayload, resumeMode);
 
-        return Promise.all([...(resumePlugins ?? []), resumeMusicSheets]);
+        return Promise.all([...resumePlugins, resumeMusicSheets]);
     });
 }
 

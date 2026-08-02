@@ -1,10 +1,18 @@
-import { createRemoteStorageClient, resolveRemoteTransport } from "@/core/remote-storage/resolve";
+import { probeVerifiedRemoteTransport } from "@/core/remote-storage/probe-remote-transport";
 import {
     getRemoteMusicPath,
     getRemoteStorageCredentialsFromConfig,
     isRemoteCredentialsCompleteInConfig,
 } from "@/core/remote-storage/remote-config";
-import type { RemoteStorageClient } from "@/core/remote-storage/types";
+import {
+    createRemoteStorageClientWithTransport,
+    resolveRemoteTransport,
+} from "@/core/remote-storage/resolve";
+import type {
+    RemoteStorageClient,
+    RemoteTransport,
+} from "@/core/remote-storage/types";
+import { RemoteTransportOfflineError } from "@/core/remote-storage/types";
 import { errorLog } from "@/utils/log";
 import { readFile } from "react-native-fs";
 
@@ -70,34 +78,65 @@ export function getRemoteMusicConfig(): RemoteMusicConfig {
     return { musicPath, remoteDir };
 }
 
-export function getRemoteMusicClient(): RemoteStorageClient {
+async function resolveMusicUploadTransport(
+    creds: ReturnType<typeof getRemoteStorageCredentialsFromConfig>,
+): Promise<RemoteTransport> {
+    if (!resolveRemoteTransport(creds)) {
+        throw new RemoteMusicConfigIncompleteError();
+    }
+    const status = await probeVerifiedRemoteTransport(creds);
+    if (status === "pcloud" || status === "webdav") {
+        return status;
+    }
+    throw new RemoteTransportOfflineError();
+}
+
+export async function getRemoteMusicClient(): Promise<RemoteStorageClient> {
     const key = buildRemoteMusicClientCacheKey();
     if (!key) {
         throw new RemoteMusicConfigIncompleteError();
     }
-    if (cachedClient && cachedClientKey === key) {
+    const snapshot = readRemoteMusicConfigSnapshot();
+    const creds = getRemoteStorageCredentialsFromConfig(snapshot);
+    const transport = await resolveMusicUploadTransport(creds);
+    const cacheKey = `${key}\0${transport}`;
+    if (cachedClient && cachedClientKey === cacheKey) {
         return cachedClient;
     }
-    const snapshot = readRemoteMusicConfigSnapshot();
-    cachedClient = createRemoteStorageClient(
-        getRemoteStorageCredentialsFromConfig(snapshot),
-    );
-    cachedClientKey = key;
+    cachedClient = createRemoteStorageClientWithTransport(creds, transport);
+    cachedClientKey = cacheKey;
     return cachedClient;
+}
+
+/** Clears the music upload client cache (unit tests). */
+export function resetRemoteMusicClientCache(): void {
+    cachedClient = null;
+    cachedClientKey = "";
 }
 
 function normalizeLocalPath(localPath: string): string {
     return localPath.startsWith("file://") ? localPath.slice(7) : localPath;
 }
 
-function base64ToUint8Array(base64: string): Uint8Array {
-    const binaryString = atob(base64);
-    const length = binaryString.length;
-    const bytes = new Uint8Array(length);
-    for (let i = 0; i < length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+function toFileUrl(localPath: string): string {
+    return `file://${normalizeLocalPath(localPath)}`;
+}
+
+/**
+ * Read local audio bytes without RNFS base64 + atob (peak memory ~file size,
+ * not ~3x). Uses fetch(file://) + arrayBuffer, same pattern as pcloud getBinary.
+ */
+export async function readLocalBinaryBytes(
+    localPath: string,
+): Promise<Uint8Array> {
+    const fileUrl = toFileUrl(localPath);
+    const response = await fetch(fileUrl);
+    if (!response.ok && response.status !== 0) {
+        throw new Error(
+            `Failed to read local file (${response.status}): ${normalizeLocalPath(localPath)}`,
+        );
     }
-    return bytes;
+    return new Uint8Array(await response.arrayBuffer());
 }
 
 type UploadFileMode = "binary" | "text";
@@ -114,12 +153,12 @@ async function uploadFile(
         await client.putText(remotePath, payload);
         return;
     }
-    const payload = base64ToUint8Array(await readFile(normalizedLocal, "base64"));
+    const payload = await readLocalBinaryBytes(normalizedLocal);
     await client.putBinary(remotePath, payload);
 }
 
 export async function remoteFileExists(remotePath: string): Promise<boolean> {
-    const client = getRemoteMusicClient();
+    const client = await getRemoteMusicClient();
     return client.exists(remotePath);
 }
 
@@ -130,7 +169,7 @@ export async function remoteAudioExists(
         return remoteFileExists(input);
     }
     const config = getRemoteMusicConfig();
-    const client = getRemoteMusicClient();
+    const client = await getRemoteMusicClient();
     const remoteAudioPath = remotePathFor(config.remoteDir, input.audioFilename);
     const exists = await client.exists(remoteAudioPath);
     return {
@@ -143,7 +182,7 @@ export async function uploadDownloadArtifacts(
     input: UploadDownloadArtifactsInput,
 ): Promise<UploadDownloadArtifactsResult> {
     const config = getRemoteMusicConfig();
-    const client = getRemoteMusicClient();
+    const client = await getRemoteMusicClient();
     await client.ensureDir(config.remoteDir);
 
     const remoteAudioPath = remotePathFor(config.remoteDir, input.audioFilename);

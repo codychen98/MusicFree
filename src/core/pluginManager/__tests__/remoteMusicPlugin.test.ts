@@ -7,6 +7,21 @@ const mockGetRemoteMusicPath = jest.fn();
 const mockGetRemoteStorageCredentialsFromConfig = jest.fn();
 const mockResolveRemoteTransport = jest.fn();
 
+jest.mock("@/core/appConfig", () => ({
+    __esModule: true,
+    default: {
+        getConfig: jest.fn(() => false),
+    },
+}));
+
+jest.mock("@/core/remote-playback-cache/download", () => ({
+    cacheRemoteTrack: jest.fn(),
+}));
+
+jest.mock("@/core/remote-playback-cache/lookup", () => ({
+    getCachedPlaybackFileUrl: jest.fn().mockResolvedValue(null),
+}));
+
 jest.mock("@/core/webdav-download/upload", () => ({
     getRemoteMusicClient: (...args: unknown[]) =>
         mockGetRemoteMusicClient(...args),
@@ -106,7 +121,7 @@ describe("remoteMusicPlugin", () => {
                 audioEntry("/Music/Download/other.flac", "other.flac"),
             ]),
         };
-        mockGetRemoteMusicClient.mockReturnValue(client);
+        mockGetRemoteMusicClient.mockResolvedValue(client);
 
         const result = await remoteMusicPlugin.instance.search!("song", 1, "music");
 
@@ -129,7 +144,7 @@ describe("remoteMusicPlugin", () => {
                 ),
             ]),
         };
-        mockGetRemoteMusicClient.mockReturnValue(client);
+        mockGetRemoteMusicClient.mockResolvedValue(client);
 
         const result = await remoteMusicPlugin.instance.search!("", 1, "music");
 
@@ -141,7 +156,7 @@ describe("remoteMusicPlugin", () => {
 
     it("returns top list groups for configured musicPath segments", async () => {
         mockGetRemoteMusicPath.mockReturnValue("/A,/B");
-        mockGetRemoteMusicClient.mockReturnValue({
+        mockGetRemoteMusicClient.mockResolvedValue({
             listDirectory: jest.fn(),
         });
 
@@ -169,7 +184,7 @@ describe("remoteMusicPlugin", () => {
                 },
             ]),
         };
-        mockGetRemoteMusicClient.mockReturnValue(client);
+        mockGetRemoteMusicClient.mockResolvedValue(client);
 
         const detail = await remoteMusicPlugin.instance.getTopListDetail!({
             platform: "WebDAV",

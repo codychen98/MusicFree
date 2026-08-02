@@ -45,30 +45,47 @@ export function createPcloudRemoteStorage({
         };
     };
 
+    const authHeaders = (): Record<string, string> => ({
+        Authorization: `Bearer ${accessToken}`,
+    });
+
+    const toUploadBody = (bytes: Uint8Array): Blob => {
+        const copy = new Uint8Array(bytes.byteLength);
+        copy.set(bytes);
+        return new Blob([copy], { type: "application/octet-stream" });
+    };
+
     const uploadBinary = async (path: string, body: Uint8Array) => {
         const { folderPath, filename } = splitFolderAndFilename(path);
-        const url = new URL(`${base}/uploadfile`);
-        url.searchParams.set("access_token", accessToken);
-        url.searchParams.set("path", folderPath);
-        url.searchParams.set("filename", filename);
 
         if (body.length === 0) {
             const formData = new FormData();
-            formData.append("file", new Blob([]), filename);
-            const response = await fetch(url.toString(), {
+            formData.append("path", folderPath);
+            formData.append("filename", filename);
+            formData.append("nopartial", "1");
+            formData.append("content", new Blob([]), filename);
+            const response = await fetch(`${base}/uploadfile`, {
                 method: "POST",
+                headers: authHeaders(),
                 body: formData,
             });
             assertOk((await response.json()) as PcloudResponse<unknown>);
             return;
         }
 
+        const url = new URL(`${base}/uploadfile`);
+        url.searchParams.set("path", folderPath);
+        url.searchParams.set("filename", filename);
+        url.searchParams.set("nopartial", "1");
+
         const response = await fetch(url.toString(), {
             method: "PUT",
-            body,
             headers: {
+                ...authHeaders(),
                 "Content-Length": String(body.length),
+                "Content-Type": "application/octet-stream",
             },
+            body: toUploadBody(body),
         });
         assertOk((await response.json()) as PcloudResponse<unknown>);
     };

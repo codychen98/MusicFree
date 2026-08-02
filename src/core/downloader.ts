@@ -120,8 +120,11 @@ interface IEvents {
     [DownloaderEvent.DownloadQueueCompleted]: () => void;
     /** WebDAV 目标：远端已有同名音频，跳过上传 */
     [DownloaderEvent.WebdavAudioSkipped]: (mediaItem: IMusic.IMusicItem) => void;
-    /** WebDAV 上传失败，已回退到本地文件夹 */
-    [DownloaderEvent.WebdavUploadFallback]: (mediaItem: IMusic.IMusicItem) => void;
+    /** WebDAV 上传失败，已回退到本地文件夹（reason 供 toast 展示） */
+    [DownloaderEvent.WebdavUploadFallback]: (
+        mediaItem: IMusic.IMusicItem,
+        reason: string,
+    ) => void;
 }
 
 class Downloader extends EventEmitter<IEvents> implements IInjectable {
@@ -241,11 +244,6 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
             artist: musicItem.artist,
             album: musicItem.album,
             duration: musicItem.duration,
-        });
-
-        patchMediaExtra(musicItem, {
-            downloaded: true,
-            localPath: undefined,
         });
 
         return { audioSkipped: uploadResult.audioSkipped };
@@ -449,10 +447,6 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
                         album: musicItem.album,
                         duration: musicItem.duration,
                     });
-                    patchMediaExtra(musicItem, {
-                        downloaded: true,
-                        localPath: undefined,
-                    });
                     this.emit(DownloaderEvent.WebdavAudioSkipped, musicItem);
                     this.markTaskAsCompleted(musicItem);
                     this.downloadNextPendingTask();
@@ -537,16 +531,17 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
                         );
                     }
                 } catch (uploadError: unknown) {
+                    const uploadReason =
+                        uploadError instanceof Error
+                            ? uploadError.message
+                            : String(uploadError);
                     errorLog("下载-WebDAV上传失败，回退本地", {
                         item: {
                             id: musicItem.id,
                             title: musicItem.title,
                             platform: musicItem.platform,
                         },
-                        reason:
-                            uploadError instanceof Error
-                                ? uploadError.message
-                                : uploadError,
+                        reason: uploadReason,
                     });
                     const fallbackTarget = addFileScheme(
                         this.getDownloadPath(audioFilename),
@@ -564,6 +559,7 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
                     this.emit(
                         DownloaderEvent.WebdavUploadFallback,
                         musicItem,
+                        uploadReason,
                     );
                 }
             } else {
@@ -728,10 +724,6 @@ class Downloader extends EventEmitter<IEvents> implements IInjectable {
                         artist: musicItem.artist,
                         album: musicItem.album,
                         duration: musicItem.duration,
-                    });
-                    patchMediaExtra(musicItem, {
-                        downloaded: true,
-                        localPath: undefined,
                     });
                     continue;
                 }

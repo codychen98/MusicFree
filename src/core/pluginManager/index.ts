@@ -41,6 +41,15 @@ const ee = new EventEmitter<{
     "enabled-updated": (pluginName: string, enabled: boolean) => void;
 }>();
 
+/**
+ * Replace MMKV plugin order map (remote-wins backup pull) and notify UI listeners.
+ * Persists the full map so not-yet-installed plugins keep their slots.
+ */
+export function applyPluginOrderMap(orderMap: Record<string, number>): void {
+    pluginMeta.setPluginOrder({ ...orderMap });
+    ee.emit("order-updated");
+}
+
 class PluginManager implements IPluginManager, IInjectable {
     private appConfigService!: IAppConfig;
 
@@ -628,8 +637,9 @@ class PluginManager implements IPluginManager, IInjectable {
         sortedPlugins.forEach((plugin, index) => {
             orderMap[plugin.name] = index;
         });
-        pluginMeta.setPluginOrder(orderMap);
-        ee.emit("order-updated");
+        applyPluginOrderMap(orderMap);
+        // Do not mark inside applyPluginOrderMap (backup pull uses it).
+        markWebdavLocalMutation();
     }
 
     setUserVariables(plugin: Plugin, userVariables: Record<string, string>) {

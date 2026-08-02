@@ -100,7 +100,7 @@ async function loadCachedAudioFiles(): Promise<RemoteDirectoryEntry[]> {
 
     let client: RemoteStorageClient;
     try {
-        client = getRemoteMusicClient();
+        client = await getRemoteMusicClient();
     } catch {
         cachedFileList = [];
         cachedFileListKey = key;
@@ -145,7 +145,7 @@ function remoteMusicPluginDefine(): IPlugin.IPluginDefine {
                 return [];
             }
             try {
-                getRemoteMusicClient();
+                await getRemoteMusicClient();
             } catch {
                 return [];
             }
@@ -163,7 +163,7 @@ function remoteMusicPluginDefine(): IPlugin.IPluginDefine {
         async getTopListDetail(topListItem) {
             let client: RemoteStorageClient;
             try {
-                client = getRemoteMusicClient();
+                client = await getRemoteMusicClient();
             } catch {
                 return { musicList: [] };
             }

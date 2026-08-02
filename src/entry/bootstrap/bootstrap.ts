@@ -319,8 +319,10 @@ function bindEvents() {
         Toast.warn(i18n.t("toast.download.webdavAudioSkipped"));
     });
 
-    downloader.on(DownloaderEvent.WebdavUploadFallback, () => {
-        Toast.warn(i18n.t("toast.download.webdavUploadFallback"));
+    downloader.on(DownloaderEvent.WebdavUploadFallback, (_mediaItem, reason) => {
+        Toast.warn(
+            `${i18n.t("toast.download.webdavUploadFallback")} (${reason})`,
+        );
     });
 
     onWebdavAfterPlaylistRemove(

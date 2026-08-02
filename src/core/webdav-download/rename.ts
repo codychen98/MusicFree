@@ -51,7 +51,7 @@ export async function renameWebdavRemoteTrack(
         return;
     }
 
-    const client = getRemoteMusicClient();
+    const client = await getRemoteMusicClient();
     const oldPaths = remotePathsForWebdavTrack(oldRemoteAudioPath);
     const newPaths = remotePathsForWebdavTrack(newRemoteAudioPath);
 

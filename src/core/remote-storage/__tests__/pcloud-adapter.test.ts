@@ -45,7 +45,7 @@ describe("pcloud adapter", () => {
         );
     });
 
-    it("uploads backup JSON with PUT and Content-Length", async () => {
+    it("uploads backup JSON with PUT, nopartial, Bearer auth, and Blob body", async () => {
         global.fetch = jest.fn().mockResolvedValue({
             json: async () => ({ result: 0, metadata: [], fileids: [] }),
         } as Response);
@@ -58,14 +58,50 @@ describe("pcloud adapter", () => {
         const payload = '{"musicSheets":[]}';
         await client.putText("/MusicFree/MusicFreeBackup.json", payload);
 
-        expect(global.fetch).toHaveBeenCalledWith(
-            expect.stringContaining(
-                "https://api.pcloud.com/uploadfile?access_token=abc&path=%2FMusicFree&filename=MusicFreeBackup.json",
-            ),
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+        const [url, init] = (global.fetch as jest.Mock).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect(url).toContain(
+            "https://api.pcloud.com/uploadfile?path=%2FMusicFree&filename=MusicFreeBackup.json&nopartial=1",
+        );
+        expect(url).not.toContain("access_token=");
+        expect(init.method).toBe("PUT");
+        expect(init.headers).toEqual(
             expect.objectContaining({
-                method: "PUT",
-                headers: { "Content-Length": String(payload.length) },
+                Authorization: "Bearer abc",
+                "Content-Length": String(payload.length),
+                "Content-Type": "application/octet-stream",
             }),
         );
+        expect(init.body).toBeInstanceOf(Blob);
+    });
+
+    it("uploads empty file with FormData nopartial and Bearer auth", async () => {
+        global.fetch = jest.fn().mockResolvedValue({
+            json: async () => ({ result: 0, metadata: [], fileids: [] }),
+        } as Response);
+
+        const client = createPcloudRemoteStorageFromCredentials({
+            hostname: "api.pcloud.com",
+            tokenJson: "{\"access_token\":\"abc\",\"token_type\":\"bearer\"}",
+        });
+
+        await client.putBinary("/MusicFree/empty.bin", new Uint8Array(0));
+
+        expect(global.fetch).toHaveBeenCalledWith(
+            "https://api.pcloud.com/uploadfile",
+            expect.objectContaining({
+                method: "POST",
+                headers: { Authorization: "Bearer abc" },
+                body: expect.any(FormData),
+            }),
+        );
+        const form = (global.fetch as jest.Mock).mock.calls[0][1]
+            .body as FormData;
+        expect(form.get("path")).toBe("/MusicFree");
+        expect(form.get("filename")).toBe("empty.bin");
+        expect(form.get("nopartial")).toBe("1");
     });
 });

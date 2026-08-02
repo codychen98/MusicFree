@@ -48,7 +48,7 @@ describe("playback-client fallback", () => {
             getText: jest.fn(),
             getDownloadUrl: jest.fn(),
         };
-        mockGetRemoteMusicClient.mockReturnValue(primary);
+        mockGetRemoteMusicClient.mockResolvedValue(primary);
 
         await expect(remoteExistsForPlayback("/song.mp3")).resolves.toBe(true);
         expect(primary.exists).toHaveBeenCalledWith("/song.mp3");
@@ -73,7 +73,7 @@ describe("playback-client fallback", () => {
         const fallback = {
             exists: jest.fn().mockResolvedValue(true),
         };
-        mockGetRemoteMusicClient.mockReturnValue(primary);
+        mockGetRemoteMusicClient.mockResolvedValue(primary);
         mockCreateWebdavRemoteStorageClient.mockReturnValue(fallback);
 
         await expect(remoteExistsForPlayback("/song.mp3")).resolves.toBe(true);
@@ -92,9 +92,9 @@ describe("playback-client fallback", () => {
             },
         });
 
-        mockGetRemoteMusicClient.mockImplementation(() => {
-            throw new RemoteMusicConfigIncompleteError();
-        });
+        mockGetRemoteMusicClient.mockRejectedValue(
+            new RemoteMusicConfigIncompleteError(),
+        );
 
         const fallback = {
             getDownloadUrl: jest.fn().mockResolvedValue("https://dav.example/song.mp3"),
@@ -124,7 +124,7 @@ describe("playback-client fallback", () => {
         const fallback = {
             getText: jest.fn().mockResolvedValue("[00:00.00]lyric"),
         };
-        mockGetRemoteMusicClient.mockReturnValue(primary);
+        mockGetRemoteMusicClient.mockResolvedValue(primary);
         mockCreateWebdavRemoteStorageClient.mockReturnValue(fallback);
 
         await expect(getRemoteTextForPlayback("/song.lrc")).resolves.toBe(
