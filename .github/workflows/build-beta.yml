@@ -110,9 +110,17 @@ jobs:
         run: chmod +x android/gradlew
 
       - name: Build Beta APK
-        run: | 
+        env:
+          # Match android/gradle.properties; also cap workers so packaging does not OOM.
+          GRADLE_OPTS: -Dorg.gradle.daemon=false
+        run: |
           cd android
-          ./gradlew assembleRelease --parallel --build-cache --configure-on-demand
+          ./gradlew assembleRelease \
+            --build-cache \
+            --configure-on-demand \
+            --no-daemon \
+            --max-workers=2 \
+            -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m"
 
       - name: List generated APKs
         run: |
