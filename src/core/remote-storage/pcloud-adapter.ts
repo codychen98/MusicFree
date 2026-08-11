@@ -49,12 +49,6 @@ export function createPcloudRemoteStorage({
         Authorization: `Bearer ${accessToken}`,
     });
 
-    const toUploadBody = (bytes: Uint8Array): Blob => {
-        const copy = new Uint8Array(bytes.byteLength);
-        copy.set(bytes);
-        return new Blob([copy], { type: "application/octet-stream" });
-    };
-
     const uploadBinary = async (path: string, body: Uint8Array) => {
         const { folderPath, filename } = splitFolderAndFilename(path);
 
@@ -78,6 +72,8 @@ export function createPcloudRemoteStorage({
         url.searchParams.set("filename", filename);
         url.searchParams.set("nopartial", "1");
 
+        // React Native's Blob cannot be constructed from ArrayBuffer/TypedArray;
+        // pass the bytes directly (RN fetch sends typed arrays via base64).
         const response = await fetch(url.toString(), {
             method: "PUT",
             headers: {
@@ -85,7 +81,7 @@ export function createPcloudRemoteStorage({
                 "Content-Length": String(body.length),
                 "Content-Type": "application/octet-stream",
             },
-            body: toUploadBody(body),
+            body,
         });
         assertOk((await response.json()) as PcloudResponse<unknown>);
     };

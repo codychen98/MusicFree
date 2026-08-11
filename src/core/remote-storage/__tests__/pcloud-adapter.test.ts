@@ -45,7 +45,7 @@ describe("pcloud adapter", () => {
         );
     });
 
-    it("uploads backup JSON with PUT, nopartial, Bearer auth, and Blob body", async () => {
+    it("uploads backup JSON with PUT, nopartial, Bearer auth, and raw bytes body", async () => {
         global.fetch = jest.fn().mockResolvedValue({
             json: async () => ({ result: 0, metadata: [], fileids: [] }),
         } as Response);
@@ -75,7 +75,11 @@ describe("pcloud adapter", () => {
                 "Content-Type": "application/octet-stream",
             }),
         );
-        expect(init.body).toBeInstanceOf(Blob);
+        // Must stay a raw Uint8Array: RN's Blob rejects ArrayBuffer/TypedArray
+        // parts, which broke remote backup on device (Node's Blob accepts them,
+        // so a Blob assertion here would hide the regression).
+        expect(init.body).toBeInstanceOf(Uint8Array);
+        expect(new TextDecoder().decode(init.body as Uint8Array)).toBe(payload);
     });
 
     it("uploads empty file with FormData nopartial and Bearer auth", async () => {
