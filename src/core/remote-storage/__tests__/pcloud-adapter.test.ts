@@ -108,4 +108,42 @@ describe("pcloud adapter", () => {
         expect(form.get("filename")).toBe("empty.bin");
         expect(form.get("nopartial")).toBe("1");
     });
+
+    const credentials = {
+        hostname: "api.pcloud.com",
+        tokenJson: "{\"access_token\":\"abc\",\"token_type\":\"bearer\"}",
+    };
+
+    const mockStat = (result: number, error?: string) => {
+        global.fetch = jest.fn().mockResolvedValue({
+            json: async () => ({ result, error }),
+        } as Response);
+    };
+
+    it("exists returns false for 2055 stat", async () => {
+        mockStat(2055, "File or folder not found.");
+        const client = createPcloudRemoteStorageFromCredentials(credentials);
+        await expect(client.exists("/missing.mp3")).resolves.toBe(false);
+    });
+
+    it("exists returns false for 2009 stat", async () => {
+        mockStat(2009, "File not found.");
+        const client = createPcloudRemoteStorageFromCredentials(credentials);
+        await expect(client.exists("/missing.mp3")).resolves.toBe(false);
+    });
+
+    it("exists returns true for present file", async () => {
+        mockStat(0);
+        const client = createPcloudRemoteStorageFromCredentials(credentials);
+        await expect(client.exists("/music/file.mp3")).resolves.toBe(true);
+    });
+
+    it("exists throws for non-not-found stat errors", async () => {
+        mockStat(2003, "Access denied.");
+        const client = createPcloudRemoteStorageFromCredentials(credentials);
+        await expect(client.exists("/music/file.mp3")).rejects.toMatchObject({
+            name: "PcloudApiError",
+            code: 2003,
+        });
+    });
 });

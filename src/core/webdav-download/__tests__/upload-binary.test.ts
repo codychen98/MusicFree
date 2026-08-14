@@ -2,9 +2,16 @@ const mockProbe = jest.fn();
 const mockCreateWithTransport = jest.fn();
 const mockReadSnapshot = jest.fn();
 const mockReadFile = jest.fn();
+const mockFileBytes = jest.fn();
 
 jest.mock("react-native-fs", () => ({
     readFile: (...args: unknown[]) => mockReadFile(...args),
+}));
+
+jest.mock("expo-file-system/next", () => ({
+    File: jest.fn().mockImplementation(() => ({
+        bytes: (...args: unknown[]) => mockFileBytes(...args),
+    })),
 }));
 
 jest.mock("@/utils/log", () => ({
@@ -31,6 +38,7 @@ jest.mock("../config", () => ({
         mockReadSnapshot(...args),
 }));
 
+import { File } from "expo-file-system/next";
 import {
     readLocalBinaryBytes,
     resetRemoteMusicClientCache,
@@ -53,45 +61,34 @@ function musicSnapshot() {
 }
 
 describe("readLocalBinaryBytes", () => {
-    const originalFetch = global.fetch;
-
     afterEach(() => {
-        global.fetch = originalFetch;
+        mockFileBytes.mockReset();
+        (File as unknown as jest.Mock).mockClear();
+        mockReadFile.mockReset();
     });
 
-    it("reads bytes via fetch(file://) + arrayBuffer, not RNFS base64", async () => {
+    it("reads bytes via File.bytes(), not fetch(file://) or RNFS base64", async () => {
         const bytes = new Uint8Array([1, 2, 3, 4, 5]);
-        global.fetch = jest.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => bytes.buffer.slice(
-                bytes.byteOffset,
-                bytes.byteOffset + bytes.byteLength,
-            ),
-        } as Response);
+        mockFileBytes.mockReturnValue(bytes);
 
         const result = await readLocalBinaryBytes("/cache/large.flac");
 
-        expect(global.fetch).toHaveBeenCalledWith("file:///cache/large.flac");
+        expect(File).toHaveBeenCalledWith("file:///cache/large.flac");
+        expect(result).toBeInstanceOf(Uint8Array);
         expect(result).toEqual(bytes);
         expect(mockReadFile).not.toHaveBeenCalled();
     });
 
-    it("strips an existing file:// prefix before fetching", async () => {
-        global.fetch = jest.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            arrayBuffer: async () => new ArrayBuffer(0),
-        } as Response);
+    it("strips an existing file:// prefix before constructing File", async () => {
+        mockFileBytes.mockReturnValue(new Uint8Array(0));
 
         await readLocalBinaryBytes("file:///tmp/song.mp3");
 
-        expect(global.fetch).toHaveBeenCalledWith("file:///tmp/song.mp3");
+        expect(File).toHaveBeenCalledWith("file:///tmp/song.mp3");
     });
 });
 
 describe("uploadDownloadArtifacts binary path", () => {
-    const originalFetch = global.fetch;
     let putBinary: jest.Mock;
     let putText: jest.Mock;
     let exists: jest.Mock;
@@ -103,6 +100,8 @@ describe("uploadDownloadArtifacts binary path", () => {
         mockCreateWithTransport.mockReset();
         mockReadSnapshot.mockReset();
         mockReadFile.mockReset();
+        mockFileBytes.mockReset();
+        (File as unknown as jest.Mock).mockClear();
         mockReadSnapshot.mockReturnValue(musicSnapshot());
         mockProbe.mockResolvedValue("webdav");
         putBinary = jest.fn().mockResolvedValue(undefined);
@@ -118,21 +117,9 @@ describe("uploadDownloadArtifacts binary path", () => {
         });
     });
 
-    afterEach(() => {
-        global.fetch = originalFetch;
-    });
-
     it("uploads audio without calling readFile(..., base64)", async () => {
         const audioBytes = new Uint8Array(64 * 1024).fill(0xab);
-        global.fetch = jest.fn().mockResolvedValue({
-            ok: true,
-            status: 200,
-            arrayBuffer: async () =>
-                audioBytes.buffer.slice(
-                    audioBytes.byteOffset,
-                    audioBytes.byteOffset + audioBytes.byteLength,
-                ),
-        } as Response);
+        mockFileBytes.mockReturnValue(audioBytes);
         mockReadFile.mockResolvedValue("[ti:test]\n");
 
         await uploadDownloadArtifacts({
@@ -141,8 +128,9 @@ describe("uploadDownloadArtifacts binary path", () => {
             localLrcPath: "/cache/track.lrc",
         });
 
-        expect(global.fetch).toHaveBeenCalledWith("file:///cache/track.flac");
+        expect(File).toHaveBeenCalledWith("file:///cache/track.flac");
         expect(putBinary).toHaveBeenCalledTimes(1);
+        expect(putBinary.mock.calls[0][1]).toBeInstanceOf(Uint8Array);
         expect(putBinary.mock.calls[0][1]).toEqual(audioBytes);
         expect(mockReadFile).toHaveBeenCalledWith("/cache/track.lrc", "utf8");
         expect(

@@ -14,6 +14,7 @@ import type {
 } from "@/core/remote-storage/types";
 import { RemoteTransportOfflineError } from "@/core/remote-storage/types";
 import { errorLog } from "@/utils/log";
+import { File } from "expo-file-system/next";
 import { readFile } from "react-native-fs";
 
 import { readRemoteMusicConfigSnapshot } from "./config";
@@ -124,19 +125,14 @@ function toFileUrl(localPath: string): string {
 
 /**
  * Read local audio bytes without RNFS base64 + atob (peak memory ~file size,
- * not ~3x). Uses fetch(file://) + arrayBuffer, same pattern as pcloud getBinary.
+ * not ~3x). Uses expo-file-system File.bytes() — native bytes, not fetch(file://)
+ * (OkHttp cannot load file:// URLs).
  */
 export async function readLocalBinaryBytes(
     localPath: string,
 ): Promise<Uint8Array> {
-    const fileUrl = toFileUrl(localPath);
-    const response = await fetch(fileUrl);
-    if (!response.ok && response.status !== 0) {
-        throw new Error(
-            `Failed to read local file (${response.status}): ${normalizeLocalPath(localPath)}`,
-        );
-    }
-    return new Uint8Array(await response.arrayBuffer());
+    const bytes = new File(toFileUrl(localPath)).bytes();
+    return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
 }
 
 type UploadFileMode = "binary" | "text";

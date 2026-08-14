@@ -2,7 +2,8 @@ import { normalizeRemotePath } from "./paths";
 import type { RemoteDirectoryEntry, RemoteStorageClient } from "./types";
 import { PcloudApiError } from "./types";
 
-const NOT_FOUND_CODES = new Set([2005, 2009]);
+/** pCloud uses 2055 for missing paths on stat; 2009 appears in older samples. */
+const NOT_FOUND_CODES = new Set([2009, 2055]);
 
 type PcloudResponse<T> = { result: number; error?: string } & T;
 
